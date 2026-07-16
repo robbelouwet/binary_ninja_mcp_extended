@@ -1215,14 +1215,17 @@ def debug_run_to(address: str, timeout_seconds: float = 30) -> str:
 
 
 @mcp.tool()
-def debug_get_registers() -> str:
+def debug_get_registers(full: bool = False) -> str:
     """
-    Read all register values of the halted target.
+    Read register values of the halted target.
 
-    Each register includes its value and, when it points into mapped memory,
-    a hint showing what it points to. Requires the target to be stopped.
+    By default returns the important registers (general-purpose + pc/sp/flags).
+    Pass full=True for the complete register file (sub-registers, segment,
+    FPU/vector). Each register includes its value and, when it points into
+    mapped memory, a hint showing what it points to. Requires a stopped target.
     """
-    return _json_dump(get_json("debug/registers"))
+    params = {"full": "1"} if full else {}
+    return _json_dump(get_json("debug/registers", params))
 
 
 @mcp.tool()

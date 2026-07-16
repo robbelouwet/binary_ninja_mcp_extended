@@ -162,9 +162,15 @@ def run_to_route(req: Request):
 
 @route("/debug/registers")
 def registers_route(req: Request):
+    """Read registers of the halted target.
+
+    Returns the important registers by default; pass full=1 for the complete
+    register file (sub-registers, segment, FPU/vector).
+    """
     session = _session(req)
+    full = str(req.param("full", "all", default="")).lower() in ("1", "true", "yes")
     try:
-        return {"registers": session.get_registers()}
+        return {"registers": session.get_registers(full=full)}
     except DebuggerError as e:
         raise HTTPError(400, str(e))
 

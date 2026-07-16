@@ -1214,9 +1214,12 @@ export function registerTools(server: McpServer, client: BinjaHttpClient): void 
 
   server.tool(
     "debug_get_registers",
-    "Read all register values of the halted target, with pointer hints. Requires the target to be stopped.",
-    {},
-    async () => jsonText(await client.getJson("debug/registers"))
+    "Read register values of the halted target, with pointer hints. Returns the important registers (general-purpose + pc/sp/flags) by default; pass full=true for the complete register file (sub-registers, segment, FPU/vector). Requires the target to be stopped.",
+    {
+      full: z.boolean().default(false).describe("Return the complete register file instead of just the important registers"),
+    },
+    async ({ full = false }) =>
+      jsonText(await client.getJson("debug/registers", full ? { full: "1" } : {}))
   );
 
   server.tool(

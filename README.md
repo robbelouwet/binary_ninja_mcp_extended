@@ -239,7 +239,7 @@ tells you exactly what happened.
 | `debug_step_out(timeout_seconds)`                    | Run until the current function returns to its caller ("finish"; blocking).                                                                                              |
 | `debug_run_to(address, timeout_seconds)`             | Resume until the target reaches an address ("advance"/"until"; blocking).                                                                                               |
 | `debug_pause()`                                      | Break into a running target (e.g. hung or looping) so it can be inspected; the in-flight run/continue returns with the stop location.                                  |
-| `debug_get_registers()`                              | Read all registers of the halted target, with pointer hints. Requires the target stopped.                                                                              |
+| `debug_get_registers(full)`                          | Read registers of the halted target, with pointer hints. Important registers by default; `full=true` for the complete file (sub-registers, segment, FPU/vector).       |
 | `debug_get_backtrace()`                              | Get the call stack of the halted target's active thread.                                                                                                                |
 | `debug_read_memory(address, size)`                   | Read memory from the halted target as a hexdump.                                                                                                                         |
 | `debug_quit()`                                       | Terminate the running target.                                                                                                                                            |
@@ -299,7 +299,7 @@ Interactive debugging endpoints:
 - `/debug/stepout?timeout=<seconds>` (GET/POST): run until the current function returns (blocking).
 - `/debug/runto?address=<addr>&timeout=<seconds>` (GET/POST): resume until an address is reached (blocking).
 - `/debug/pause` (GET/POST): break into a running target so it can be inspected.
-- `/debug/registers`: registers of the halted target (with pointer hints).
+- `/debug/registers?full=<bool>`: registers of the halted target (with pointer hints); `full=1` returns the complete register file.
 - `/debug/backtrace`: call stack of the halted target's active thread.
 - `/debug/memory?address=<addr>&size=<n>`: hexdump of memory from the halted target.
 - `/debug/quit` (GET/POST): terminate the running target.

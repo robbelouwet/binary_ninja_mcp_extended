@@ -466,21 +466,32 @@ class DebuggerSession:
 
     # ---------- inspection ----------
 
-    def get_registers(self) -> list[dict[str, Any]]:
+    def get_registers(self, full: bool = False) -> list[dict[str, Any]]:
         with self._lock:
             self._require_halted()
-            regs = self.controller.regs
-            out = []
-            for name, reg in regs.regs.items():
-                out.append(
-                    {
-                        "name": name,
-                        "value": hex(reg.value),
-                        "width": reg.width,
-                        "hint": reg.hint or None,
-                    }
-                )
-            return out
+            return self._format_registers(full=full)
+
+    def _format_registers(self, full: bool = False) -> list[dict[str, Any]]:
+        """Format the target's registers.
+
+        By default returns only the important registers for the detected
+        architecture (general-purpose + pc/sp/flags), curating out the dozens of
+        sub-registers and vector/FPU registers. ``full=True`` returns them all.
+        For an unrecognized architecture we return everything rather than risk
+        hiding something.
+        """
+        regs = self.controller.regs
+        all_regs = [
+            {"name": name, "value": hex(reg.value), "width": reg.width, "hint": reg.hint or None}
+            for name, reg in regs.regs.items()
+        ]
+        if full:
+            return all_regs
+        important = _important_registers(regs.regs.keys())
+        if important is None:
+            return all_regs
+        by_name = {r["name"]: r for r in all_regs}
+        return [by_name[name] for name in important if name in by_name]
 
     def get_backtrace(self) -> list[dict[str, Any]]:
         with self._lock:
@@ -550,10 +561,9 @@ class DebuggerSession:
         return {name: reg.value for name, reg in regs.regs.items()}
 
     def _register_dicts(self) -> list[dict[str, Any]]:
-        return [
-            {"name": name, "value": hex(reg.value), "width": reg.width, "hint": reg.hint or None}
-            for name, reg in self.controller.regs.regs.items()
-        ]
+        # Concise set for auto-attached stop context; use get_registers(full=True)
+        # for the complete register file.
+        return self._format_registers(full=False)
 
     def _backtrace_dicts(self) -> list[dict[str, Any]]:
         thread = self.controller.active_thread
@@ -582,6 +592,37 @@ class DebuggerSession:
 
 class DebuggerError(Exception):
     """Raised for debugger-state errors that map to a 400 response."""
+
+
+# Important registers per architecture, in display order: general-purpose plus
+# pc/sp/flags. Detected from the register names present so we curate the right
+# set; an unrecognized architecture falls back to showing every register.
+_ARCH_IMPORTANT_REGS: dict[str, list[str]] = {
+    "x86_64": [
+        "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp",
+        "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", "rip", "rflags",
+    ],
+    "x86": ["eax", "ebx", "ecx", "edx", "esi", "edi", "ebp", "esp", "eip", "eflags"],
+    "aarch64": [f"x{i}" for i in range(31)] + ["sp", "pc", "cpsr", "pstate"],
+    "armv7": [f"r{i}" for i in range(13)] + ["sp", "lr", "pc", "cpsr"],
+}  # fmt: skip
+
+
+def _important_registers(names) -> list[str] | None:
+    """Return the important-register list for the arch implied by ``names``,
+    or None when the architecture is unrecognized (caller shows all)."""
+    present = set(names)
+    if "rip" in present:
+        arch = "x86_64"
+    elif "eip" in present:
+        arch = "x86"
+    elif "pc" in present and "x0" in present:
+        arch = "aarch64"
+    elif "pc" in present and "r0" in present:
+        arch = "armv7"
+    else:
+        return None
+    return _ARCH_IMPORTANT_REGS[arch]
 
 
 def _busy_result() -> dict[str, Any]:
