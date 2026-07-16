@@ -175,6 +175,10 @@ automatically.
 - `debug_delete_breakpoint` - Delete a breakpoint by id
 - `debug_run` - Launch and run until the next stop (blocking); `stop_at_entry` optional
 - `debug_continue` - Continue until the next stop (blocking)
+- `debug_step` - Single-instruction step into calls (blocking)
+- `debug_step_over` - Single-instruction step over calls (blocking)
+- `debug_step_out` - Run until the current function returns ("finish"; blocking)
+- `debug_run_to` - Resume until a given address ("advance"/"until"; blocking)
 - `debug_pause` - Break into a running (hung/looping) target
 - `debug_get_registers` - Read registers of the halted target
 - `debug_get_backtrace` - Get the call stack of the halted target

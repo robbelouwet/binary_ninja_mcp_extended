@@ -119,6 +119,47 @@ def pause_route(req: Request):
     return session.pause()
 
 
+@route("/debug/step", methods=("GET", "POST"))
+def step_route(req: Request):
+    """Execute a single instruction, stepping into calls (blocking, bounded)."""
+    session = _session(req)
+    try:
+        return session.step_into(timeout=_timeout_param(req))
+    except DebuggerError as e:
+        raise HTTPError(400, str(e))
+
+
+@route("/debug/stepover", methods=("GET", "POST"))
+def step_over_route(req: Request):
+    """Execute a single instruction, stepping over calls (blocking, bounded)."""
+    session = _session(req)
+    try:
+        return session.step_over(timeout=_timeout_param(req))
+    except DebuggerError as e:
+        raise HTTPError(400, str(e))
+
+
+@route("/debug/stepout", methods=("GET", "POST"))
+def step_out_route(req: Request):
+    """Run until the current function returns to its caller (blocking, bounded)."""
+    session = _session(req)
+    try:
+        return session.step_out(timeout=_timeout_param(req))
+    except DebuggerError as e:
+        raise HTTPError(400, str(e))
+
+
+@route("/debug/runto", methods=("GET", "POST"))
+def run_to_route(req: Request):
+    """Resume until the target reaches a given address (advance/until)."""
+    session = _session(req)
+    address = _address(req, "address", "addr", help="Required: address to run to")
+    try:
+        return session.run_to(address, timeout=_timeout_param(req))
+    except DebuggerError as e:
+        raise HTTPError(400, str(e))
+
+
 @route("/debug/registers")
 def registers_route(req: Request):
     session = _session(req)

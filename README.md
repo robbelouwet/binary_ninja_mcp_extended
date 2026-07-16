@@ -234,6 +234,10 @@ tells you exactly what happened.
 | `debug_delete_breakpoint(id)`                        | Delete a breakpoint by id.                                                                                                                                              |
 | `debug_run(stop_at_entry, timeout_seconds, ...)`     | Launch the target and run until it stops (blocking). Runs to the first breakpoint by default; `stop_at_entry` halts at the entry point instead.                        |
 | `debug_continue(timeout_seconds)`                    | Continue a stopped target until it next stops (blocking).                                                                                                               |
+| `debug_step(timeout_seconds)`                        | Execute a single instruction, stepping into calls (blocking).                                                                                                           |
+| `debug_step_over(timeout_seconds)`                   | Execute a single instruction, stepping over calls (blocking).                                                                                                           |
+| `debug_step_out(timeout_seconds)`                    | Run until the current function returns to its caller ("finish"; blocking).                                                                                              |
+| `debug_run_to(address, timeout_seconds)`             | Resume until the target reaches an address ("advance"/"until"; blocking).                                                                                               |
 | `debug_pause()`                                      | Break into a running target (e.g. hung or looping) so it can be inspected; the in-flight run/continue returns with the stop location.                                  |
 | `debug_get_registers()`                              | Read all registers of the halted target, with pointer hints. Requires the target stopped.                                                                              |
 | `debug_get_backtrace()`                              | Get the call stack of the halted target's active thread.                                                                                                                |
@@ -290,6 +294,10 @@ Interactive debugging endpoints:
 - `/debug/breakpoint` (GET/POST/DELETE): list, add (`address`, optional `condition`), or delete (`id`) a breakpoint.
 - `/debug/run?stop_at_entry=<bool>&timeout=<seconds>` (GET/POST): launch and run until the next stop (blocking). `timeout<=0` waits indefinitely. Optional `cmd_line`, `working_directory`, `adapter_type`.
 - `/debug/continue?timeout=<seconds>` (GET/POST): continue until the next stop (blocking).
+- `/debug/step?timeout=<seconds>` (GET/POST): single-instruction step into calls (blocking).
+- `/debug/stepover?timeout=<seconds>` (GET/POST): single-instruction step over calls (blocking).
+- `/debug/stepout?timeout=<seconds>` (GET/POST): run until the current function returns (blocking).
+- `/debug/runto?address=<addr>&timeout=<seconds>` (GET/POST): resume until an address is reached (blocking).
 - `/debug/pause` (GET/POST): break into a running target so it can be inspected.
 - `/debug/registers`: registers of the halted target (with pointer hints).
 - `/debug/backtrace`: call stack of the halted target's active thread.

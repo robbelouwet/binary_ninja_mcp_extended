@@ -216,6 +216,41 @@ class DebuggerSession:
         finally:
             self._end_run()
 
+    def step_into(self, timeout: float | None = DEFAULT_RUN_TIMEOUT) -> dict[str, Any]:
+        """Execute a single instruction, stepping into calls."""
+        return self._step_control(self.controller.step_into_and_wait, timeout)
+
+    def step_over(self, timeout: float | None = DEFAULT_RUN_TIMEOUT) -> dict[str, Any]:
+        """Execute a single instruction, stepping over calls."""
+        return self._step_control(self.controller.step_over_and_wait, timeout)
+
+    def step_out(self, timeout: float | None = DEFAULT_RUN_TIMEOUT) -> dict[str, Any]:
+        """Run until the current function returns to its caller (finish)."""
+        return self._step_control(self.controller.step_return_and_wait, timeout)
+
+    def run_to(self, address: int, timeout: float | None = DEFAULT_RUN_TIMEOUT) -> dict[str, Any]:
+        """Resume until the target reaches ``address`` (advance/until)."""
+        return self._step_control(lambda: self.controller.run_to_and_wait(address), timeout)
+
+    def _step_control(self, wait_fn, timeout: float | None) -> dict[str, Any]:
+        """Run one blocking step/advance op and report where it stopped.
+
+        Reuses the run machinery (single-run guard, timeout auto-pause,
+        stop-result contract) but does not loop past conditional breakpoints:
+        a step is a single action, so we report wherever it lands.
+        """
+        if not self.is_live:
+            return {"status": "error", "message": "No live target. Run the program first."}
+        if not self._begin_run():
+            return _busy_result()
+        try:
+            reason, timed_out = self._wait(wait_fn, timeout)
+            if timed_out:
+                return self._timeout_result()
+            return self._resolve_stop(reason)
+        finally:
+            self._end_run()
+
     def pause(self) -> dict[str, Any]:
         """Request a running target to stop, so it can be inspected.
 

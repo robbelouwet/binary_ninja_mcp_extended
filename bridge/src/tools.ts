@@ -1172,6 +1172,47 @@ export function registerTools(server: McpServer, client: BinjaHttpClient): void 
   );
 
   server.tool(
+    "debug_step",
+    "Execute a single instruction, stepping INTO calls (BLOCKING). Returns where execution landed (same stop-result shape as debug_run). Requires a stopped target.",
+    {
+      timeout_seconds: z.number().default(30).describe("Auto-pause after this many seconds (0 = wait indefinitely)"),
+    },
+    async ({ timeout_seconds = 30 }) =>
+      jsonText(await client.getJson("debug/step", { timeout: timeout_seconds }, httpTimeoutMs(timeout_seconds)))
+  );
+
+  server.tool(
+    "debug_step_over",
+    "Execute a single instruction, stepping OVER calls (BLOCKING). A call runs to completion before stopping. Requires a stopped target.",
+    {
+      timeout_seconds: z.number().default(30).describe("Auto-pause after this many seconds (0 = wait indefinitely)"),
+    },
+    async ({ timeout_seconds = 30 }) =>
+      jsonText(await client.getJson("debug/stepover", { timeout: timeout_seconds }, httpTimeoutMs(timeout_seconds)))
+  );
+
+  server.tool(
+    "debug_step_out",
+    "Run until the current function returns to its caller, i.e. \"finish\" (BLOCKING). Requires a stopped target.",
+    {
+      timeout_seconds: z.number().default(30).describe("Auto-pause after this many seconds (0 = wait indefinitely)"),
+    },
+    async ({ timeout_seconds = 30 }) =>
+      jsonText(await client.getJson("debug/stepout", { timeout: timeout_seconds }, httpTimeoutMs(timeout_seconds)))
+  );
+
+  server.tool(
+    "debug_run_to",
+    "Resume until the target reaches a given address, i.e. \"advance\"/\"until\" (BLOCKING). Requires a live target.",
+    {
+      address: z.string().describe("Address, hex like 0x401000 or decimal"),
+      timeout_seconds: z.number().default(30).describe("Auto-pause after this many seconds (0 = wait indefinitely)"),
+    },
+    async ({ address, timeout_seconds = 30 }) =>
+      jsonText(await client.getJson("debug/runto", { address, timeout: timeout_seconds }, httpTimeoutMs(timeout_seconds)))
+  );
+
+  server.tool(
     "debug_get_registers",
     "Read all register values of the halted target, with pointer hints. Requires the target to be stopped.",
     {},

@@ -1149,6 +1149,72 @@ def debug_pause() -> str:
 
 
 @mcp.tool()
+def debug_step(timeout_seconds: float = 30) -> str:
+    """
+    Execute a single instruction, stepping INTO calls (BLOCKING).
+
+    Returns the same stop-result shape as debug_run (where execution landed).
+    Requires a stopped target. Same timeout_seconds semantics as debug_run.
+    """
+    return _json_dump(
+        get_json(
+            "debug/step", {"timeout": timeout_seconds}, timeout=_http_timeout_for(timeout_seconds)
+        )
+    )
+
+
+@mcp.tool()
+def debug_step_over(timeout_seconds: float = 30) -> str:
+    """
+    Execute a single instruction, stepping OVER calls (BLOCKING).
+
+    A call instruction runs to completion and returns before stopping. Same
+    stop-result shape and timeout semantics as debug_run. Requires a stopped target.
+    """
+    return _json_dump(
+        get_json(
+            "debug/stepover",
+            {"timeout": timeout_seconds},
+            timeout=_http_timeout_for(timeout_seconds),
+        )
+    )
+
+
+@mcp.tool()
+def debug_step_out(timeout_seconds: float = 30) -> str:
+    """
+    Run until the current function returns to its caller, i.e. "finish" (BLOCKING).
+
+    Same stop-result shape and timeout semantics as debug_run. Requires a stopped target.
+    """
+    return _json_dump(
+        get_json(
+            "debug/stepout",
+            {"timeout": timeout_seconds},
+            timeout=_http_timeout_for(timeout_seconds),
+        )
+    )
+
+
+@mcp.tool()
+def debug_run_to(address: str, timeout_seconds: float = 30) -> str:
+    """
+    Resume until the target reaches a given address, i.e. "advance"/"until" (BLOCKING).
+
+    - address: hex like "0x401000" or decimal.
+
+    Same stop-result shape and timeout semantics as debug_run. Requires a live target.
+    """
+    return _json_dump(
+        get_json(
+            "debug/runto",
+            {"address": address, "timeout": timeout_seconds},
+            timeout=_http_timeout_for(timeout_seconds),
+        )
+    )
+
+
+@mcp.tool()
 def debug_get_registers() -> str:
     """
     Read all register values of the halted target.
