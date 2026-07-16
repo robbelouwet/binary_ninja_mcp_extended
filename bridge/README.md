@@ -5,7 +5,7 @@ This is the TypeScript implementation of the Binary Ninja MCP bridge server. It 
 ## Features
 
 - **Standalone MCP Server**: Run independently with any MCP client
-- **50+ Tools**: Full access to Binary Ninja's reverse engineering capabilities
+- **60+ Tools**: Full access to Binary Ninja's reverse engineering and debugging capabilities
 - **Easy Configuration**: CLI options and environment variables for host/port
 - **TypeScript**: Full type safety and better developer experience
 
@@ -161,6 +161,25 @@ If installed globally:
 - `make_function_at` - Create function at address
 - `list_platforms` - List available platforms
 - `patch_bytes` - Patch bytes in binary
+
+### Debugging Tools
+
+Interactive debugging: set breakpoints, run the target, and inspect its state
+when it stops. `debug_run`/`debug_continue` block until the target next stops
+(breakpoint, exit, crash, or timeout) and return a stop result describing what
+happened; unexpected stops (crash/signal/timeout) attach registers + backtrace
+automatically.
+
+- `debug_set_breakpoint` - Set a breakpoint, with an optional condition (e.g. `rdi == 0x10`)
+- `debug_list_breakpoints` - List breakpoints
+- `debug_delete_breakpoint` - Delete a breakpoint by id
+- `debug_run` - Launch and run until the next stop (blocking); `stop_at_entry` optional
+- `debug_continue` - Continue until the next stop (blocking)
+- `debug_pause` - Break into a running (hung/looping) target
+- `debug_get_registers` - Read registers of the halted target
+- `debug_get_backtrace` - Get the call stack of the halted target
+- `debug_read_memory` - Read memory from the halted target as a hexdump
+- `debug_quit` - Terminate the running target
 
 ### Utility Tools
 

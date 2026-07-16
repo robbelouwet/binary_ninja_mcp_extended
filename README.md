@@ -219,6 +219,38 @@ The following table lists the available MCP functions for use:
 | `set_function_prototype(name_or_address, prototype)`                 | Set a function's prototype by name or address.                                                               |
 | `patch_bytes(address, data, save_to_file)`                           | Patch raw bytes at an address (byte-level, not assembly). Can patch entire instructions by providing their bytecode. Address: hex (e.g., "0x401000") or decimal. Data: hex string (e.g., "90 90"). `save_to_file` (default True) saves to disk and re-signs on macOS. |
 
+### Interactive Debugging
+
+Drive Binary Ninja's debugger from the MCP client: set breakpoints, run the
+target, and inspect its state when it stops — a debugging session comparable to
+using a debugger by hand. `run`/`continue` **block** until the target next stops
+(a breakpoint, exit, crash, or the timeout), so the returned stop result always
+tells you exactly what happened.
+
+| Function                                             | Description                                                                                                                                                             |
+| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `debug_set_breakpoint(address, condition)`           | Set a breakpoint. Optional `condition` (e.g. `"rdi == 0x10"`) only stops when true; registers, integer/hex literals, comparisons and arithmetic are supported.        |
+| `debug_list_breakpoints()`                           | List all breakpoints with their ids and conditions.                                                                                                                    |
+| `debug_delete_breakpoint(id)`                        | Delete a breakpoint by id.                                                                                                                                              |
+| `debug_run(stop_at_entry, timeout_seconds, ...)`     | Launch the target and run until it stops (blocking). Runs to the first breakpoint by default; `stop_at_entry` halts at the entry point instead.                        |
+| `debug_continue(timeout_seconds)`                    | Continue a stopped target until it next stops (blocking).                                                                                                               |
+| `debug_pause()`                                      | Break into a running target (e.g. hung or looping) so it can be inspected; the in-flight run/continue returns with the stop location.                                  |
+| `debug_get_registers()`                              | Read all registers of the halted target, with pointer hints. Requires the target stopped.                                                                              |
+| `debug_get_backtrace()`                              | Get the call stack of the halted target's active thread.                                                                                                                |
+| `debug_read_memory(address, size)`                   | Read memory from the halted target as a hexdump.                                                                                                                         |
+| `debug_quit()`                                       | Terminate the running target.                                                                                                                                            |
+
+**Stop results.** `debug_run`/`debug_continue` return a `status` of `breakpoint`,
+`exited`, `crashed`, `signal`, `stopped`, or `paused`. For any *unexpected* stop
+(a crash, a signal, or a timeout-pause) the register state and backtrace are
+attached automatically, so you never have to guess why the target stopped.
+
+**Blocking and hangs.** `run`/`continue` block up to `timeout_seconds`
+(default 30); if the target hasn't stopped by then it is paused and returned
+with its current location (`status: "paused"`, `timed_out: true`) so a hung or
+long-running target is never fatal. Use `timeout_seconds=0` to wait
+indefinitely and break in with `debug_pause` from a separate request.
+
 These are the list of HTTP endpoints that can be called:
 
 - `/allStrings`: All strings in one response.
@@ -252,6 +284,17 @@ These are the list of HTTP endpoints that can be called:
     - `mapping`: JSON object of `old->new`
     - `pairs`: compact string `old1:new1,old2:new2`
           Returns per-item results plus totals. Order is respected; later pairs can refer to earlier new names.
+
+Interactive debugging endpoints:
+
+- `/debug/breakpoint` (GET/POST/DELETE): list, add (`address`, optional `condition`), or delete (`id`) a breakpoint.
+- `/debug/run?stop_at_entry=<bool>&timeout=<seconds>` (GET/POST): launch and run until the next stop (blocking). `timeout<=0` waits indefinitely. Optional `cmd_line`, `working_directory`, `adapter_type`.
+- `/debug/continue?timeout=<seconds>` (GET/POST): continue until the next stop (blocking).
+- `/debug/pause` (GET/POST): break into a running target so it can be inspected.
+- `/debug/registers`: registers of the halted target (with pointer hints).
+- `/debug/backtrace`: call stack of the halted target's active thread.
+- `/debug/memory?address=<addr>&size=<n>`: hexdump of memory from the halted target.
+- `/debug/quit` (GET/POST): terminate the running target.
 
 ## Development
 

@@ -436,9 +436,14 @@ def _register_notifications():
             try:
                 bv = _active_binary_view()
                 if bv and _plugin and _plugin.server:
+                    ops = _plugin.server.binary_ops
+                    # Kill a debuggee bound to the view being closed
+                    session = getattr(ops, "_debugger_session", None)
+                    if session is not None and session.bv is bv:
+                        ops.shutdown_debugger()
                     fn = getattr(bv.file, "filename", None)
                     if fn:
-                        _plugin.server.binary_ops.unregister_by_filename(fn)
+                        ops.unregister_by_filename(fn)
             except Exception:
                 pass
 

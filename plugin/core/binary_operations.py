@@ -5,6 +5,7 @@ types, comments, xrefs); this class only holds shared state and wires the
 mixins together so callers keep a single ``BinaryOperations`` interface.
 """
 
+import threading
 import weakref
 
 import binaryninja as bn
@@ -12,6 +13,7 @@ import binaryninja as bn
 from .comments import CommentOperations
 from .config import BinaryNinjaConfig
 from .data import DataOperations
+from .debugger import DebuggerOperations
 from .functions import FunctionOperations
 from .types import TypeOperations
 from .views import ViewOperations
@@ -25,6 +27,7 @@ class BinaryOperations(
     TypeOperations,
     CommentOperations,
     XrefOperations,
+    DebuggerOperations,
 ):
     def __init__(self, config: BinaryNinjaConfig):
         self.config = config
@@ -34,6 +37,9 @@ class BinaryOperations(
         self._views_by_id: dict[str, weakref.ReferenceType] = {}
         self._next_view_id: int = 1
         self._id_by_filename: dict[str, str] = {}
+        # Guards the view registry: request threads and the UI monitor thread
+        # both mutate it. Reentrant because register/unregister call _prune_views.
+        self._registry_lock = threading.RLock()
 
     @property
     def current_view(self) -> bn.BinaryView | None:

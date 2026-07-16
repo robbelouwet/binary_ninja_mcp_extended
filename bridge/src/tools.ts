@@ -1095,4 +1095,110 @@ export function registerTools(server: McpServer, client: BinjaHttpClient): void 
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
     }
   );
+
+  // ---------- Debugging ----------
+
+  // Client HTTP timeout (ms) that outlives the server-side pause timeout, or
+  // 0 (no timeout) for an unbounded run.
+  const httpTimeoutMs = (runTimeout: number): number => (runTimeout <= 0 ? 0 : (runTimeout + 20) * 1000);
+  const jsonText = (data: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] });
+
+  server.tool(
+    "debug_set_breakpoint",
+    "Set a breakpoint at an address in the current binary. Optional condition (e.g. \"rdi == 0x10\") only stops when true.",
+    {
+      address: z.string().describe("Address, hex like 0x401000 or decimal"),
+      condition: z.string().default("").describe("Optional condition expression over registers"),
+    },
+    async ({ address, condition = "" }) => {
+      const body: Record<string, unknown> = { address };
+      if (condition) body.condition = condition;
+      return { content: [{ type: "text", text: await client.post("debug/breakpoint", body) }] };
+    }
+  );
+
+  server.tool(
+    "debug_list_breakpoints",
+    "List all breakpoints currently set in the debugger.",
+    {},
+    async () => jsonText(await client.getJson("debug/breakpoint"))
+  );
+
+  server.tool(
+    "debug_delete_breakpoint",
+    "Delete a breakpoint by its id (see debug_list_breakpoints).",
+    {
+      id: z.number().describe("Breakpoint id to delete"),
+    },
+    async ({ id }) => {
+      return { content: [{ type: "text", text: await client.post("debug/breakpoint", { id, _method: "DELETE" }) }] };
+    }
+  );
+
+  server.tool(
+    "debug_run",
+    "Launch the target under the debugger and run until it stops (BLOCKING). Runs to the first breakpoint by default; stop_at_entry halts at the entry point. If not stopped within timeout_seconds the target is auto-paused and returned with its location (status \"paused\"). Use timeout_seconds=0 to wait indefinitely.",
+    {
+      stop_at_entry: z.boolean().default(false).describe("Halt at the program entry point instead of the first breakpoint"),
+      timeout_seconds: z.number().default(30).describe("Auto-pause after this many seconds (0 = wait indefinitely)"),
+      cmd_line: z.string().default("").describe("Command-line arguments for the target"),
+      working_directory: z.string().default("").describe("Working directory to launch in"),
+    },
+    async ({ stop_at_entry = false, timeout_seconds = 30, cmd_line = "", working_directory = "" }) => {
+      const params: Record<string, string | number> = { timeout: timeout_seconds };
+      if (stop_at_entry) params.stop_at_entry = "1";
+      if (cmd_line) params.cmd_line = cmd_line;
+      if (working_directory) params.working_directory = working_directory;
+      return jsonText(await client.getJson("debug/run", params, httpTimeoutMs(timeout_seconds)));
+    }
+  );
+
+  server.tool(
+    "debug_continue",
+    "Continue a stopped target until it next stops (BLOCKING). Same stop-result and timeout_seconds semantics as debug_run.",
+    {
+      timeout_seconds: z.number().default(30).describe("Auto-pause after this many seconds (0 = wait indefinitely)"),
+    },
+    async ({ timeout_seconds = 30 }) => {
+      return jsonText(await client.getJson("debug/continue", { timeout: timeout_seconds }, httpTimeoutMs(timeout_seconds)));
+    }
+  );
+
+  server.tool(
+    "debug_pause",
+    "Break into a running target (e.g. hung or looping) so it can be inspected. The in-flight debug_run/debug_continue returns with the stop location.",
+    {},
+    async () => jsonText(await client.getJson("debug/pause"))
+  );
+
+  server.tool(
+    "debug_get_registers",
+    "Read all register values of the halted target, with pointer hints. Requires the target to be stopped.",
+    {},
+    async () => jsonText(await client.getJson("debug/registers"))
+  );
+
+  server.tool(
+    "debug_get_backtrace",
+    "Get the call stack (backtrace) of the halted target's active thread. Requires the target to be stopped.",
+    {},
+    async () => jsonText(await client.getJson("debug/backtrace"))
+  );
+
+  server.tool(
+    "debug_read_memory",
+    "Read memory from the halted target and return it as a hexdump. Requires the target to be stopped.",
+    {
+      address: z.string().describe("Address, hex like 0x401000 or decimal"),
+      size: z.number().default(64).describe("Number of bytes to read"),
+    },
+    async ({ address, size = 64 }) => jsonText(await client.getJson("debug/memory", { address, size }))
+  );
+
+  server.tool(
+    "debug_quit",
+    "Terminate the running target under the debugger.",
+    {},
+    async () => jsonText(await client.getJson("debug/quit"))
+  );
 }

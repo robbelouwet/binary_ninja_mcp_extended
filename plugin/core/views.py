@@ -58,6 +58,10 @@ class ViewOperations:
     # ---------------- Multi-binary helpers ----------------
     def _prune_views(self) -> None:
         """Remove entries for BinaryViews that no longer exist and rebuild filename map."""
+        with self._registry_lock:
+            self._prune_views_locked()
+
+    def _prune_views_locked(self) -> None:
         alive: dict[str, weakref.ReferenceType] = {}
         new_fn_map: dict[str, str] = {}
         alive_objs: list[object] = []
@@ -89,6 +93,10 @@ class ViewOperations:
 
     def _register_view(self, bv: bn.BinaryView) -> str:
         """Add a view to the managed list if not present, return its id."""
+        with self._registry_lock:
+            return self._register_view_locked(bv)
+
+    def _register_view_locked(self, bv: bn.BinaryView) -> str:
         self._prune_views()
         # Reuse existing id if the exact object is already tracked
         for vid, w in list(self._views_by_id.items()):
@@ -130,6 +138,10 @@ class ViewOperations:
         """
         if not filename:
             return 0
+        with self._registry_lock:
+            return self._unregister_by_filename_locked(filename)
+
+    def _unregister_by_filename_locked(self, filename: str) -> int:
         self._prune_views()
         to_delete: list[str] = []
         for vid, w in list(self._views_by_id.items()):

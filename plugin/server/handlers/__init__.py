@@ -7,6 +7,7 @@ from . import (
     binaries,
     comments,
     data,
+    debugger,
     functions,
     types,
     values,

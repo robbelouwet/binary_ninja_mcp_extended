@@ -134,6 +134,25 @@ def safe_post(endpoint: str, data: dict | str) -> str:
         return f"Request failed: {e!s}"
 
 
+def safe_post_json(endpoint: str, data: dict, timeout: float | None = 5):
+    """POST form data and return parsed JSON (mirrors get_json's error handling)."""
+    try:
+        response = requests.post(f"{binja_server_url}/{endpoint}", data=data, timeout=timeout)
+        response.encoding = "utf-8"
+        try:
+            parsed = response.json()
+        except Exception:
+            parsed = None
+        if response.ok:
+            return parsed
+        if isinstance(parsed, dict):
+            parsed.setdefault("status", response.status_code)
+            return parsed
+        return {"error": f"Error {response.status_code}: {(response.text or '').strip()}"}
+    except Exception as e:
+        return {"error": f"Request failed: {e!s}"}
+
+
 @mcp.tool()
 def list_methods(offset: int = 0, limit: int = 100) -> list:
     """
@@ -1014,6 +1033,159 @@ def patch_bytes(address: str, data: str, save_to_file: bool = True) -> str:
     if isinstance(result, dict) and "error" in result:
         return f"Error: {result['error']}"
     return str(result)
+
+
+def _json_dump(data) -> str:
+    import json as _json
+
+    return _json.dumps(data, indent=2, ensure_ascii=False)
+
+
+@mcp.tool()
+def debug_set_breakpoint(address: str, condition: str = "") -> str:
+    """
+    Set a breakpoint at an address in the current binary.
+
+    - address: hex like "0x401000" or decimal.
+    - condition: optional expression evaluated when the breakpoint is hit;
+      execution only stops if it is true. Registers and integer/hex literals
+      with comparisons and arithmetic are supported, e.g. "rdi == 0x10" or
+      "rax & 1 and rsi > 0". Leave empty for an unconditional breakpoint.
+
+    Returns the created breakpoint (with its id).
+    """
+    params = {"address": address}
+    if condition:
+        params["condition"] = condition
+    return _json_dump(safe_post_json("debug/breakpoint", params))
+
+
+@mcp.tool()
+def debug_list_breakpoints() -> str:
+    """List all breakpoints currently set in the debugger."""
+    return _json_dump(get_json("debug/breakpoint"))
+
+
+@mcp.tool()
+def debug_delete_breakpoint(id: int) -> str:
+    """Delete a breakpoint by its id (see debug_list_breakpoints)."""
+    return _json_dump(safe_post_json("debug/breakpoint", {"id": id, "_method": "DELETE"}))
+
+
+def _http_timeout_for(run_timeout: float) -> float | None:
+    """Client HTTP timeout: outlive the server-side pause timeout, or wait
+    forever when the run is unbounded (run_timeout <= 0)."""
+    return None if run_timeout <= 0 else run_timeout + 20
+
+
+@mcp.tool()
+def debug_run(
+    stop_at_entry: bool = False,
+    timeout_seconds: float = 30,
+    cmd_line: str = "",
+    working_directory: str = "",
+) -> str:
+    """
+    Launch the target under the debugger and run until it stops (BLOCKING).
+
+    Blocks until a breakpoint is hit, the process exits, or it crashes. By
+    default the program runs to your first breakpoint; the debugger's automatic
+    stop at the entry point is suppressed.
+
+    Optional launch settings:
+    - stop_at_entry: if true, halt at the program entry point instead of running
+      to the first breakpoint.
+    - timeout_seconds: if the target has not stopped within this many seconds it
+      is automatically paused and returned with its current location, so a hung
+      or long-running target can still be inspected (status "paused",
+      timed_out=true). Use 0 to wait indefinitely.
+    - cmd_line: command-line arguments for the target.
+    - working_directory: working directory to launch in.
+
+    Returns a stop result describing what happened: status is one of
+    "breakpoint", "exited", "crashed", "signal", "stopped", or "paused". For any
+    unexpected stop (crash, signal, timeout-pause) the register state and
+    backtrace are included automatically.
+    """
+    params = {"timeout": timeout_seconds}
+    if stop_at_entry:
+        params["stop_at_entry"] = "1"
+    if cmd_line:
+        params["cmd_line"] = cmd_line
+    if working_directory:
+        params["working_directory"] = working_directory
+    return _json_dump(get_json("debug/run", params, timeout=_http_timeout_for(timeout_seconds)))
+
+
+@mcp.tool()
+def debug_continue(timeout_seconds: float = 30) -> str:
+    """
+    Continue a stopped target until it next stops (BLOCKING).
+
+    Same stop-result shape and timeout_seconds semantics as debug_run. Requires
+    a live target (call debug_run first).
+    """
+    return _json_dump(
+        get_json(
+            "debug/continue",
+            {"timeout": timeout_seconds},
+            timeout=_http_timeout_for(timeout_seconds),
+        )
+    )
+
+
+@mcp.tool()
+def debug_pause() -> str:
+    """
+    Break into a running target so it can be inspected.
+
+    Use this to stop a target that is hung or looping. It signals the target to
+    stop; the in-flight debug_run/debug_continue then returns with the stop
+    location (registers and backtrace attached). Note: debug_run/debug_continue
+    also auto-pause themselves after their timeout, so this is mainly for
+    unbounded runs (timeout_seconds=0) or an explicit early break.
+    """
+    return _json_dump(get_json("debug/pause"))
+
+
+@mcp.tool()
+def debug_get_registers() -> str:
+    """
+    Read all register values of the halted target.
+
+    Each register includes its value and, when it points into mapped memory,
+    a hint showing what it points to. Requires the target to be stopped.
+    """
+    return _json_dump(get_json("debug/registers"))
+
+
+@mcp.tool()
+def debug_get_backtrace() -> str:
+    """
+    Get the call stack (backtrace) of the halted target's active thread.
+
+    Requires the target to be stopped.
+    """
+    return _json_dump(get_json("debug/backtrace"))
+
+
+@mcp.tool()
+def debug_read_memory(address: str, size: int = 64) -> str:
+    """
+    Read memory from the halted target and return it as a hexdump.
+
+    - address: hex like "0x401000" or decimal.
+    - size: number of bytes to read (default 64).
+
+    Requires the target to be stopped.
+    """
+    return _json_dump(get_json("debug/memory", {"address": address, "size": size}))
+
+
+@mcp.tool()
+def debug_quit() -> str:
+    """Terminate the running target under the debugger."""
+    return _json_dump(get_json("debug/quit"))
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ endpoint logic lives in the ``handlers`` package.
 import json
 import threading
 import urllib.parse
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 import binaryninja as bn
@@ -170,7 +170,9 @@ class MCPServer:
             {"binary_ops": self.binary_ops},
         )
 
-        self.server = HTTPServer(server_address, handler_class)
+        # Threaded so a blocking request (e.g. a debugger "run until stop") does
+        # not wedge the whole server; other requests, including a pause, still run.
+        self.server = ThreadingHTTPServer(server_address, handler_class)
         self.thread = threading.Thread(target=self.server.serve_forever)
         self.thread.daemon = True
         self.thread.start()
@@ -178,6 +180,11 @@ class MCPServer:
 
     def stop(self):
         """Stop the HTTP server and clean up resources."""
+        # Terminate any live debuggee before tearing down the server.
+        try:
+            self.binary_ops.shutdown_debugger()
+        except Exception as e:
+            bn.log_warn(f"Error shutting down debugger: {e}")
         if self.server:
             self.server.shutdown()
             self.server.server_close()
