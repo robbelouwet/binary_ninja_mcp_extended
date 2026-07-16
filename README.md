@@ -255,6 +255,30 @@ These are the list of HTTP endpoints that can be called:
 
 ## Development
 
+### Project Layout
+
+```
+plugin/
+├── __init__.py      # Plugin entry point: server lifecycle, menu commands
+├── settings.py      # Binary Ninja settings registration
+├── ui.py            # Status bar indicator and UI notifications
+├── server/
+│   ├── http_server.py   # HTTP server and request dispatch
+│   ├── router.py        # Route registry (@route decorator)
+│   └── handlers/        # One module per endpoint domain
+├── api/
+│   └── endpoints.py     # Higher-level operations shared by handlers
+├── core/
+│   └── binary_operations.py  # Facade over domain mixins (views, functions,
+│                              # data, types, comments, xrefs)
+└── utils/               # Hexdump, number/string parsing helpers
+bridge/                  # MCP stdio bridge that proxies to the HTTP server
+```
+
+To add an endpoint: write a handler in the matching `plugin/server/handlers/`
+module (or a new one) and register it with `@route("/path")`; put any Binary
+Ninja API logic in the corresponding `plugin/core/` mixin.
+
 ### Code Quality
 
 This project uses [Ruff](https://docs.astral.sh/ruff/) for linting and formatting. Configuration is in `ruff.toml`.

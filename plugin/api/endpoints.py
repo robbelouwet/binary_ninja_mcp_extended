@@ -246,6 +246,11 @@ class BinaryNinjaEndpoints:
             bn.log_error(f"Error getting assembly for function: {e}")
             return None
 
+    def list_platforms(self) -> dict[str, Any]:
+        """List all platform names known to Binary Ninja."""
+        platforms = [str(getattr(p, "name", p)) for p in list(bn.Platform)]
+        return {"platforms": platforms, "count": len(platforms)}
+
     def make_function_at(
         self, address: str | int, architecture: str | None = None
     ) -> dict[str, Any]:
