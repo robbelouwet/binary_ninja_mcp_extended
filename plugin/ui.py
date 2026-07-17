@@ -431,19 +431,33 @@ def _register_notifications():
             except Exception as e:
                 bn.log_error(f"MCP Max OnAfterOpenFile error: {e}")
 
-        # Best-effort close notifications (may not be called on all versions)
+        # Best-effort close notifications (may not be called on all versions).
+        # Signature is (context, file, frame); act on the VIEW BEING CLOSED, not
+        # the active view, and by object identity — never by filename, since a
+        # transient debug view shares the real binary's filename and must not
+        # evict it. Registry cleanup and current_view rebinding happen in
+        # _prune_views.
         def OnBeforeCloseFile(self, *args):  # type: ignore[override]
             try:
-                bv = _active_binary_view()
-                if bv and _plugin and _plugin.server:
-                    ops = _plugin.server.binary_ops
-                    # Kill a debuggee bound to the view being closed
-                    session = getattr(ops, "_debugger_session", None)
-                    if session is not None and session.bv is bv:
-                        ops.shutdown_debugger()
-                    fn = getattr(bv.file, "filename", None)
-                    if fn:
-                        ops.unregister_by_filename(fn)
+                if not (_plugin and _plugin.server):
+                    return
+                ops = _plugin.server.binary_ops
+                frame = args[-1] if args else None
+                closing_bv = None
+                if frame is not None and hasattr(frame, "getCurrentBinaryView"):
+                    try:
+                        closing_bv = frame.getCurrentBinaryView()
+                    except Exception:
+                        closing_bv = None
+                if closing_bv is None:
+                    return
+                # Tear down a debugger session backed by the view being closed.
+                session = getattr(ops, "_debugger_session", None)
+                if session is not None and session.bv is closing_bv:
+                    ops.shutdown_debugger()
+                # Clear current_view only when the exact current view is closing.
+                if ops.current_view is closing_bv:
+                    ops.current_view = None
             except Exception:
                 pass
 

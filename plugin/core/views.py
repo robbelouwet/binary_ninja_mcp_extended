@@ -82,12 +82,38 @@ class ViewOperations:
                 new_fn_map[fn] = vid
         self._views_by_id = alive
         self._id_by_filename = new_fn_map
-        # If current_view no longer exists among alive views, clear it
+        self._reconcile_current_view(alive_objs)
+
+    @staticmethod
+    def _view_filename(v) -> str | None:
         try:
-            if self._current_view is not None and all(
-                obj is not self._current_view for obj in alive_objs
-            ):
-                self._current_view = None
+            return str(getattr(v.file, "filename", None)) if getattr(v, "file", None) else None
+        except Exception:
+            return None
+
+    def _reconcile_current_view(self, alive_objs: list) -> None:
+        """Keep current_view bound to a live view of its file.
+
+        Binary Ninja creates fresh BinaryView objects for the same file while
+        debugging (e.g. a rebased view). Our registry dedups by filename and
+        re-points the weakref to the newest object, which can orphan the exact
+        object current_view holds even though the file is still open. Rather than
+        clear current_view in that case (which breaks the session with a spurious
+        "No binary loaded"), rebind it to a live registered view of the same
+        file; only clear when no live view for the file remains.
+        """
+        try:
+            cur = self._current_view
+            if cur is None or any(obj is cur for obj in alive_objs):
+                return
+            cur_fn = self._view_filename(cur)
+            rebind = None
+            if cur_fn:
+                for obj in alive_objs:
+                    if self._view_filename(obj) == cur_fn:
+                        rebind = obj
+                        break
+            self._current_view = rebind
         except Exception:
             self._current_view = None
 
@@ -159,15 +185,8 @@ class ViewOperations:
                 to_delete.append(vid)
         for vid in to_delete:
             self._views_by_id.pop(vid, None)
-        # Rebuild filename map and clear current_view if it matched
-        try:
-            cur_fn = None
-            if self._current_view and getattr(self._current_view, "file", None):
-                cur_fn = getattr(self._current_view.file, "filename", None)
-            if cur_fn == filename:
-                self._current_view = None
-        except Exception:
-            self._current_view = None
+        # _prune_views reconciles current_view: it rebinds to a live view of the
+        # same file if one remains, and only clears when the file is truly gone.
         self._prune_views()
         return len(to_delete)
 
