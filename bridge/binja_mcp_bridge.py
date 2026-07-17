@@ -1181,6 +1181,34 @@ def debug_backend_command(command: str) -> str:
 
 
 @mcp.tool()
+def debug_list_modules() -> str:
+    """
+    List the images loaded in the running target (the executable and every shared
+    library), each with its runtime load base and size. Requires a live target.
+    """
+    return _json_dump(get_json("debug/modules"))
+
+
+@mcp.tool()
+def debug_resolve_address(address: str) -> str:
+    """
+    Resolve a runtime address to its memory mapping and backing image.
+
+    Finds the memory region (page mapping) containing the address and, when that
+    region is backed by a loaded image, reports the image's load base and the
+    address's offset within the image, such that image_base + image_offset ==
+    address. Returns: mmap_base (region start), mmap_end, permissions,
+    region_label ([stack]/[heap]/[vdso] for anonymous regions), image_name,
+    image_base, image_offset.
+
+    Purely descriptive: no static/analysis translation is done — dynamic
+    addresses are reported as-is. Use this to understand what a live address
+    (from a register, the stack, etc.) actually points at. Requires a live target.
+    """
+    return _json_dump(get_json("debug/resolve", {"address": address}))
+
+
+@mcp.tool()
 def debug_step(timeout_seconds: float = 30) -> str:
     """
     Execute a single instruction, stepping INTO calls (BLOCKING).

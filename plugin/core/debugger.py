@@ -11,6 +11,8 @@ created session bound to the current view.
 """
 
 import contextlib
+import os
+import re
 import threading
 from typing import Any
 
@@ -18,6 +20,17 @@ import binaryninja as bn
 from binaryninja.settings import Settings
 
 from .condition import evaluate_condition
+
+# Parses one LLDB `memory region` output line, e.g.
+#   [0x0000000000401000-0x0000000000402000) r-x /path/to/exe PT_LOAD[1]
+#   [0x00007ffffffde000-0x00007ffffffff000) rw- [stack]
+_LLDB_REGION_RE = re.compile(r"\[0x([0-9A-Fa-f]+)-0x([0-9A-Fa-f]+)\)\s*(\S+)?\s*(.*)")
+
+# Some adapters do not populate a module's size (they report a garbage value).
+# Only use a module's size for range containment when it is plausibly real, so a
+# bogus size can never misattribute an unrelated address (e.g. a stack pointer)
+# to an image.
+_MAX_IMAGE_SIZE = 1 << 34  # 16 GiB
 
 # Binary Ninja setting controlling the debugger's automatic stop at the program
 # entry point. Toggling it (rather than "skipping the first breakpoint") is the
@@ -321,6 +334,161 @@ class DebuggerSession:
                 "message": f"Backend command failed: {e}",
             }
         return {"status": "ok", "adapter": adapter, "command": command, "output": output}
+
+    # ---------- address / memory-map inspection ----------
+
+    def list_modules(self) -> list[dict[str, Any]]:
+        """List the images loaded in the target (executable + shared libraries)."""
+        if not self.is_live:
+            raise DebuggerError("No live target. Run the program first.")
+        out = []
+        for m in self.controller.modules:
+            base = getattr(m, "address", None)
+            size = getattr(m, "size", None)
+            # Some adapters report a garbage size; only surface a plausible one.
+            plausible_size = isinstance(size, int) and 0 < size < _MAX_IMAGE_SIZE
+            out.append(
+                {
+                    "name": getattr(m, "short_name", None) or _basename(getattr(m, "name", "")),
+                    "path": getattr(m, "name", None),
+                    "base": hex(base) if isinstance(base, int) else None,
+                    "size": hex(size) if plausible_size else None,
+                }
+            )
+        return out
+
+    def resolve_address(self, address: int) -> dict[str, Any]:
+        """Resolve a runtime address to its memory mapping and backing image.
+
+        Finds the memory region (page mapping) containing ``address`` and, when
+        that region is backed by a loaded image, reports the image's load base
+        and the address's offset within the image, such that
+        ``image_base + image_offset == address``. Purely descriptive — no
+        static/analysis translation is performed.
+        """
+        if not self.is_live:
+            return {"status": "error", "message": "No live target. Run the program first."}
+
+        region = self._query_memory_region(address)
+        if region is None:
+            return {
+                "status": "error",
+                "address": hex(address),
+                "message": "Could not query the memory map for this adapter.",
+            }
+        if not region.get("mapped"):
+            return {
+                "status": "unmapped",
+                "address": hex(address),
+                "message": "Address is not in any mapped region.",
+            }
+        # LLDB reports inter-mapping gaps as regions with no access permissions
+        # ("---"); that is not a real mapping, so report it as unmapped.
+        perms = region.get("perms")
+        if perms and set(perms) <= {"-"}:
+            return {
+                "status": "unmapped",
+                "address": hex(address),
+                "mmap_base": hex(region["start"]),
+                "mmap_end": hex(region["end"]),
+                "message": "Address is in an inaccessible gap between mappings.",
+            }
+
+        result: dict[str, Any] = {
+            "status": "ok",
+            "address": hex(address),
+            "mmap_base": hex(region["start"]),
+            "mmap_end": hex(region["end"]),
+            "permissions": region.get("perms"),
+            "region_label": region.get("label"),
+            "image_name": None,
+            "image_base": None,
+            "image_offset": None,
+        }
+        image = self._image_for_region(address, region)
+        if image is not None:
+            name, base = image
+            result["image_name"] = name
+            result["image_base"] = hex(base)
+            result["image_offset"] = hex(address - base)
+        return result
+
+    def _query_memory_region(self, address: int) -> dict[str, Any] | None:
+        """Ask the adapter for the memory region containing ``address``.
+
+        Returns a parsed region dict, ``{"mapped": False}`` when the address is
+        unmapped, or ``None`` when the adapter/output is not understood.
+        """
+        adapter = (_safe(lambda: self.controller.adapter_type, default="") or "").upper()
+        if "DBGENG" in adapter or "WINDBG" in adapter:
+            return None  # WinDbg (!address) parsing not implemented yet
+        try:
+            output = self.controller.execute_backend_command(f"memory region {hex(address)}")
+        except Exception:
+            return None
+        return self._parse_lldb_region(output)
+
+    @staticmethod
+    def _parse_lldb_region(output: str) -> dict[str, Any] | None:
+        text = (output or "").strip()
+        if not text or text.lower().startswith("error"):
+            # LLDB prints an error for an unmapped address.
+            return {"mapped": False}
+        m = _LLDB_REGION_RE.search(text)
+        if not m:
+            return None
+        start = int(m.group(1), 16)
+        end = int(m.group(2), 16)
+        perms = m.group(3)
+        rest = (m.group(4) or "").strip()
+        # Strip a trailing "PT_LOAD[n]" segment tag.
+        seg = re.search(r"\bPT_LOAD\[(\d+)\]", rest)
+        segment = int(seg.group(1)) if seg else None
+        rest = re.sub(r"\s*\bPT_LOAD\[\d+\]", "", rest).strip()
+        label = None
+        file_path = None
+        if rest.startswith("[") and rest.endswith("]"):
+            label = rest  # e.g. [stack], [heap], [vdso]
+        elif rest:
+            file_path = rest
+        return {
+            "mapped": True,
+            "start": start,
+            "end": end,
+            "perms": perms,
+            "label": label,
+            "file": file_path,
+            "segment": segment,
+        }
+
+    def _image_for_region(self, address: int, region: dict[str, Any]):
+        """Return ``(image_name, image_base)`` for the region, or None.
+
+        Prefers matching the region's backing file to a loaded image; falls back
+        to any loaded image whose reported range contains the address (covers
+        anonymous segments such as .bss that carry no file label).
+        """
+        modules = list(_safe(lambda: self.controller.modules, default=[]) or [])
+        file_path = region.get("file")
+        if file_path:
+            target = _basename(file_path)
+            for m in modules:
+                if (
+                    getattr(m, "name", None) == file_path
+                    or _basename(getattr(m, "name", "")) == target
+                ):
+                    return (getattr(m, "short_name", None) or target, m.address)
+        for m in modules:
+            base = getattr(m, "address", None)
+            size = getattr(m, "size", None)
+            if (
+                isinstance(base, int)
+                and isinstance(size, int)
+                and 0 < size < _MAX_IMAGE_SIZE
+                and base <= address < base + size
+            ):
+                return (getattr(m, "short_name", None) or _basename(getattr(m, "name", "")), base)
+        return None
 
     def _continue_loop(self, timeout: float | None) -> dict[str, Any]:
         """go_and_wait, transparently re-continuing past conditional breakpoints
@@ -682,6 +850,10 @@ def _busy_result() -> dict[str, Any]:
         "status": "error",
         "message": "A run/continue is already in progress. Pause it before starting another.",
     }
+
+
+def _basename(path: str) -> str:
+    return os.path.basename(path) if path else ""
 
 
 def _reason_name(reason) -> str:

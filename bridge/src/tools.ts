@@ -1190,6 +1190,22 @@ export function registerTools(server: McpServer, client: BinjaHttpClient): void 
   );
 
   server.tool(
+    "debug_list_modules",
+    "List the images loaded in the running target (the executable and every shared library), each with its runtime load base and size. Requires a live target.",
+    {},
+    async () => jsonText(await client.getJson("debug/modules"))
+  );
+
+  server.tool(
+    "debug_resolve_address",
+    "Resolve a runtime address to its memory mapping and backing image. Finds the region (page mapping) containing the address and, when it is backed by a loaded image, reports the image's load base and the offset within the image such that image_base + image_offset == address. Returns mmap_base, mmap_end, permissions, region_label ([stack]/[heap]/[vdso]), image_name, image_base, image_offset. Purely descriptive — no static translation. Requires a live target.",
+    {
+      address: z.string().describe("Runtime address, hex like 0x7ffff7c28000 or decimal"),
+    },
+    async ({ address }) => jsonText(await client.getJson("debug/resolve", { address }))
+  );
+
+  server.tool(
     "debug_step",
     "Execute a single instruction, stepping INTO calls (BLOCKING). Returns where execution landed (same stop-result shape as debug_run). Requires a stopped target.",
     {

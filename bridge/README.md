@@ -182,6 +182,8 @@ automatically.
 - `debug_pause` - Break into a running (hung/looping) target
 - `debug_status` - Session status: active adapter (dialect), live/running, current ip/function, breakpoint count
 - `debug_backend_command` - Escape hatch: run a raw LLDB/WinDbg adapter command (e.g. watchpoints, memory maps)
+- `debug_list_modules` - List loaded images (executable + shared libraries) with runtime bases
+- `debug_resolve_address` - Resolve a runtime address to its mapping and backing image (mmap_base, image_base, image_name, image_offset)
 - `debug_get_registers` - Read registers of the halted target
 - `debug_get_backtrace` - Get the call stack of the halted target
 - `debug_read_memory` - Read memory from the halted target as a hexdump

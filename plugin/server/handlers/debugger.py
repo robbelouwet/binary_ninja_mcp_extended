@@ -138,6 +138,24 @@ def backend_route(req: Request):
     return session.execute_backend_command(command)
 
 
+@route("/debug/modules")
+def modules_route(req: Request):
+    """List the images loaded in the target (executable + shared libraries)."""
+    session = _session(req)
+    try:
+        return {"modules": session.list_modules()}
+    except DebuggerError as e:
+        raise HTTPError(400, str(e))
+
+
+@route("/debug/resolve")
+def resolve_route(req: Request):
+    """Resolve a runtime address to its memory mapping and backing image."""
+    session = _session(req)
+    address = _address(req, "address", "addr", help="Required: address to resolve")
+    return session.resolve_address(address)
+
+
 @route("/debug/step", methods=("GET", "POST"))
 def step_route(req: Request):
     """Execute a single instruction, stepping into calls (blocking, bounded)."""
