@@ -1172,6 +1172,17 @@ export function registerTools(server: McpServer, client: BinjaHttpClient): void 
   );
 
   server.tool(
+    "debug_backend_command",
+    "Run a raw command in the underlying debug adapter's console (LLDB/WinDbg) — an escape hatch for capabilities not yet wrapped as structured tools (e.g. hardware breakpoints/watchpoints via LLDB 'watchpoint set'/WinDbg 'ba', memory maps via 'memory region'). Returns the adapter's output plus which adapter is active. Requires a live target. Prefer structured debug_* tools for execution control.",
+    {
+      command: z.string().describe("Raw adapter command, e.g. LLDB 'memory region 0x401000' or WinDbg 'ba w4 0x401000'"),
+    },
+    async ({ command }) => ({
+      content: [{ type: "text", text: await client.post("debug/backend", { command }) }],
+    })
+  );
+
+  server.tool(
     "debug_step",
     "Execute a single instruction, stepping INTO calls (BLOCKING). Returns where execution landed (same stop-result shape as debug_run). Requires a stopped target.",
     {

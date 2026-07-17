@@ -1149,6 +1149,23 @@ def debug_pause() -> str:
 
 
 @mcp.tool()
+def debug_backend_command(command: str) -> str:
+    """
+    Run a raw command in the underlying debug adapter's console (escape hatch).
+
+    For the LLDB adapter this is any LLDB command; for DbgEng, any WinDbg command.
+    Returns the adapter's printed output plus which adapter is active (so you know
+    the command dialect). Useful for capabilities not yet wrapped as structured
+    tools, e.g. hardware breakpoints/watchpoints (LLDB `watchpoint set ...`,
+    WinDbg `ba`) or memory maps (LLDB `memory region`). Requires a live target.
+
+    Prefer the structured debug_* tools for execution control: commands that
+    change execution state here bypass this server's stop tracking.
+    """
+    return _json_dump(safe_post_json("debug/backend", {"command": command}))
+
+
+@mcp.tool()
 def debug_step(timeout_seconds: float = 30) -> str:
     """
     Execute a single instruction, stepping INTO calls (BLOCKING).

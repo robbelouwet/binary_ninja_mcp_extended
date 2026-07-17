@@ -119,6 +119,18 @@ def pause_route(req: Request):
     return session.pause()
 
 
+@route("/debug/backend", methods=("GET", "POST"))
+def backend_route(req: Request):
+    """Run a raw command in the underlying debug adapter's (LLDB/WinDbg) console.
+
+    Escape hatch for capabilities not yet wrapped as structured tools. POST is
+    preferred for commands with spaces/special characters.
+    """
+    session = _session(req)
+    command = req.require("command", "cmd", help="Required: command (a raw adapter command)")
+    return session.execute_backend_command(command)
+
+
 @route("/debug/step", methods=("GET", "POST"))
 def step_route(req: Request):
     """Execute a single instruction, stepping into calls (blocking, bounded)."""

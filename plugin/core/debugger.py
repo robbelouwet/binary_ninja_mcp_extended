@@ -270,6 +270,31 @@ class DebuggerSession:
             "message": "Pause requested; the in-flight run/continue will return with the stop location.",
         }
 
+    def execute_backend_command(self, command: str) -> dict[str, Any]:
+        """Run a raw command in the underlying debug adapter's console.
+
+        Escape hatch to the LLDB/WinDbg backend: any command the adapter accepts
+        (e.g. LLDB ``watchpoint set ...`` / ``memory region``, WinDbg ``ba``)
+        runs and its printed output is returned, along with which adapter is
+        active so the caller knows the command dialect. Not run under the session
+        lock, so it stays responsive. Prefer the structured debug_* tools for
+        execution control — commands that change execution state here bypass this
+        session's stop tracking.
+        """
+        if not self.is_live:
+            return {"status": "error", "message": "No live target. Run the program first."}
+        adapter = _safe(lambda: self.controller.adapter_type, default=None)
+        try:
+            output = self.controller.execute_backend_command(command)
+        except Exception as e:
+            return {
+                "status": "error",
+                "adapter": adapter,
+                "command": command,
+                "message": f"Backend command failed: {e}",
+            }
+        return {"status": "ok", "adapter": adapter, "command": command, "output": output}
+
     def _continue_loop(self, timeout: float | None) -> dict[str, Any]:
         """go_and_wait, transparently re-continuing past conditional breakpoints
         whose condition evaluates false. Returns on any real stop or timeout."""
