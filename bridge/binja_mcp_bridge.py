@@ -1050,9 +1050,11 @@ def debug_set_breakpoint(location: str, condition: str = "") -> str:
       address (hex like "0x401000" or decimal). Names are resolved against the
       analysis, so you can break on a function without looking up its address.
     - condition: optional expression evaluated when the breakpoint is hit;
-      execution only stops if it is true. Registers and integer/hex literals
-      with comparisons and arithmetic are supported, e.g. "rdi == 0x10" or
-      "rax & 1 and rsi > 0". Leave empty for an unconditional breakpoint.
+      execution only stops if it is true. Registers, integer/hex literals,
+      comparisons, arithmetic, and memory dereference are supported, e.g.
+      "rdi == 0x10", "rax & 1 and rsi > 0", or "u32([rdi]) == 0x1234". Leave
+      empty for an unconditional breakpoint. See debug_evaluate for the full
+      expression syntax.
 
     Returns the created breakpoint (with its id, resolved address, and symbol).
     """
@@ -1452,6 +1454,32 @@ def debug_read_memory(address: str, size: int = 64) -> str:
     unmapped. Requires the target to be stopped.
     """
     return _json_dump(get_json("debug/memory", {"address": address, "size": size}))
+
+
+@mcp.tool()
+def debug_evaluate(expression: str) -> str:
+    """
+    Evaluate an expression over the halted target's registers and memory.
+
+    Supported syntax (a deliberately small, safe language — no code execution):
+    - registers: rax, rdi, rsp, rip, ...
+    - integer/hex literals: 42, 0x1000
+    - arithmetic: + - * / % & | ^ << >> and unary - ~
+    - comparison / boolean: == != < <= > >=, and, or, not
+    - memory dereference:
+        [expr]          read 8 bytes (pointer-sized) at address expr
+        deref(expr)     same as [expr]
+        u8/u16/u32/u64(expr)   read that many bytes, unsigned
+        i8/i16/i32/i64(expr)   read that many bytes, signed
+
+    Examples: "rax + 8", "[rsp]", "u32([rdi]) == 0x1234", "rdi & 0xfff",
+    "*deref chains* e.g. [[rbp]]".
+
+    Returns the value as hex and decimal; if the result points at a readable
+    string or a known function, that is annotated. Requires the target to be
+    stopped.
+    """
+    return _json_dump(safe_post_json("debug/evaluate", {"expression": expression}))
 
 
 @mcp.tool()

@@ -1110,10 +1110,10 @@ export function registerTools(server: McpServer, client: BinjaHttpClient): void 
 
   server.tool(
     "debug_set_breakpoint",
-    "Set a breakpoint in the current binary. The location is a symbol/function name (e.g. 'checkResponse', 'main') OR an address (hex like 0x401000 or decimal) — names are resolved against the analysis. Optional condition (e.g. \"rdi == 0x10\") only stops when true. Returns the breakpoint with its id, resolved address, and symbol.",
+    "Set a breakpoint in the current binary. The location is a symbol/function name (e.g. 'checkResponse', 'main') OR an address (hex like 0x401000 or decimal) — names are resolved against the analysis. Optional condition only stops when true; it supports registers, arithmetic, comparisons, and memory dereference (e.g. \"rdi == 0x10\" or \"u32([rdi]) == 0x1234\") — see debug_evaluate for the full syntax. Returns the breakpoint with its id, resolved address, and symbol.",
     {
       location: z.string().describe("Symbol/function name, or address (hex 0x401000 or decimal)"),
-      condition: z.string().default("").describe("Optional condition expression over registers"),
+      condition: z.string().default("").describe("Optional condition expression over registers/memory"),
     },
     async ({ location, condition = "" }) => {
       const body: Record<string, unknown> = { location };
@@ -1398,6 +1398,17 @@ export function registerTools(server: McpServer, client: BinjaHttpClient): void 
       size: z.number().default(64).describe("Number of bytes to read"),
     },
     async ({ address, size = 64 }) => jsonText(await client.getJson("debug/memory", { address, size }))
+  );
+
+  server.tool(
+    "debug_evaluate",
+    "Evaluate an expression over the halted target's registers and memory. Safe, small language (no code execution): registers (rax, rsp, ...), int/hex literals, arithmetic (+ - * / % & | ^ << >> - ~), comparison/boolean (== != < <= > >=, and/or/not), and memory dereference: [expr] reads 8 bytes at expr, deref(expr) same, u8/u16/u32/u64(expr) and signed i8..i64(expr) read that many bytes. Examples: 'rax + 8', '[rsp]', 'u32([rdi]) == 0x1234', '[[rbp]]'. Returns hex + decimal; annotates a pointer that points at a string or known function. Requires the target to be stopped.",
+    {
+      expression: z.string().describe("Expression, e.g. '[rsp]' or 'rax + 8'"),
+    },
+    async ({ expression }) => ({
+      content: [{ type: "text", text: await client.post("debug/evaluate", { expression }) }],
+    })
   );
 
   server.tool(

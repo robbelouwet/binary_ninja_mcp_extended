@@ -196,6 +196,7 @@ automatically.
 - `debug_select_frame` - Select a stack frame; context/registers/backtrace reflect it (persists)
 - `debug_frame_up` / `debug_frame_down` - Move one frame toward the caller / callee (gdb up/down)
 - `debug_read_memory` - Read memory from the halted target as a hexdump (errors on non-readable/unmapped)
+- `debug_evaluate` - Evaluate an expression over registers and memory (arithmetic + dereference `[expr]`/`deref`/`u8..u64`/`i8..i64`)
 - `debug_set_register` - Set a register in the halted target (verified by readback)
 - `debug_write_memory` - Write bytes to the halted target's live process memory (non-writable/unmapped regions error)
 - `debug_quit` - Terminate the running target

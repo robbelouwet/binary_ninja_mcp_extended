@@ -19,7 +19,7 @@ from typing import Any
 import binaryninja as bn
 from binaryninja.settings import Settings
 
-from .condition import evaluate_condition
+from .condition import ConditionError, evaluate, evaluate_condition
 
 # Parses one LLDB `memory region` output line, e.g.
 #   [0x0000000000401000-0x0000000000402000) r-x /path/to/exe PT_LOAD[1]
@@ -820,7 +820,7 @@ class DebuggerSession:
         if bp is None or not bp.condition:
             return result
         try:
-            hit = evaluate_condition(bp.condition, self._register_values())
+            hit = evaluate_condition(bp.condition, self._register_values(), self._read_mem_or_none)
         except Exception as e:
             # A broken condition shouldn't strand the client; stop and report.
             result["condition_error"] = f"{bp.condition!r}: {e}"
@@ -1176,6 +1176,41 @@ class DebuggerSession:
                     )
             return data
 
+    def evaluate_expression(self, expr: str) -> dict[str, Any]:
+        """Evaluate an expression over registers and memory.
+
+        Supports registers, integer/hex literals, arithmetic/comparison/boolean
+        operators, and memory dereference (``[expr]``, ``deref(expr)``,
+        ``u8/u16/u32/u64`` and signed ``i8..i64``). Returns the value in several
+        forms; for a non-boolean result that looks like a pointer, annotates what
+        it points at.
+        """
+        with self._lock:
+            self._require_halted()
+            regs = self._register_values()
+            try:
+                value = evaluate(expr, regs, self._read_mem_or_none)
+            except ConditionError as e:
+                raise DebuggerError(f"Cannot evaluate {expr!r}: {e}")
+
+            result: dict[str, Any] = {"status": "ok", "expression": expr}
+            if isinstance(value, bool):
+                result["type"] = "bool"
+                result["value"] = value
+                return result
+            # Normalize to an unsigned 64-bit view for hex display.
+            u64 = value & 0xFFFFFFFFFFFFFFFF
+            result["type"] = "int"
+            result["value"] = hex(u64)
+            result["decimal"] = value
+            points_to = self._maybe_string(u64)
+            if points_to is not None:
+                result["points_to"] = points_to
+            func = self._function_name(hex(u64))
+            if func is not None:
+                result["symbol"] = func
+            return result
+
     def set_register(self, name: str, value: int) -> dict[str, Any]:
         """Set a register's value, verifying the write by reading it back."""
         with self._lock:
@@ -1388,8 +1423,28 @@ class DebuggerSession:
             raise DebuggerError("Target is running. It must be stopped to inspect state.")
 
     def _register_values(self) -> dict[str, int]:
+        # Respect the selected frame so debug_evaluate is consistent with
+        # debug_get_registers / debug_context. A caller frame exposes only its
+        # recoverable registers (clobbered ones are absent, and referencing one
+        # in an expression fails with "unknown register" — honestly).
+        if self._selected_frame != 0:
+            out: dict[str, int] = {}
+            for r in self._frame_registers(self._selected_frame) or []:
+                try:
+                    out[r["name"]] = int(r["value"], 16)
+                except (ValueError, TypeError):
+                    continue
+            return out
         regs = self.controller.regs
         return {name: reg.value for name, reg in regs.regs.items()}
+
+    def _read_mem_or_none(self, address: int, size: int) -> bytes | None:
+        """Memory reader for the expression evaluator: bytes, or None on failure."""
+        buf = _safe(lambda: self.controller.read_memory(address, size), default=None)
+        if buf is None:
+            return None
+        data = bytes(buf)
+        return data if len(data) >= size else None
 
     def _register_dicts(self) -> list[dict[str, Any]]:
         # Concise set for auto-attached stop context; use get_registers(full=True)

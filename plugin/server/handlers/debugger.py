@@ -330,6 +330,19 @@ def registers_route(req: Request):
         raise HTTPError(400, str(e))
 
 
+@route("/debug/evaluate", methods=("GET", "POST"))
+def evaluate_route(req: Request):
+    """Evaluate an expression over registers and memory."""
+    session = _session(req)
+    expr = req.require(
+        "expression", "expr", help="Required: expression (e.g. '[rsp]' or 'rax + 8')"
+    )
+    try:
+        return session.evaluate_expression(str(expr))
+    except DebuggerError as e:
+        raise HTTPError(400, str(e))
+
+
 @route("/debug/backtrace")
 def backtrace_route(req: Request):
     """Backtrace of the active thread, or of ``tid`` when given."""

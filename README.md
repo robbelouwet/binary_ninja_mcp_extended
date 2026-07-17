@@ -243,7 +243,7 @@ rest, which are honestly omitted.)
 
 | Function                                             | Description                                                                                                                                                             |
 | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `debug_set_breakpoint(location, condition)`          | Set a breakpoint by symbol/function **name** (e.g. `"checkResponse"`) or address. Optional `condition` (e.g. `"rdi == 0x10"`) only stops when true; registers, integer/hex literals, comparisons and arithmetic are supported. |
+| `debug_set_breakpoint(location, condition)`          | Set a breakpoint by symbol/function **name** (e.g. `"checkResponse"`) or address. Optional `condition` only stops when true; supports registers, arithmetic, comparisons, and memory dereference (e.g. `"rdi == 0x10"`, `"u32([rdi]) == 0x1234"`) — same syntax as `debug_evaluate`. |
 | `debug_list_breakpoints()`                           | List all breakpoints with their ids, addresses, symbols, conditions, and enabled state.                                                                                |
 | `debug_delete_breakpoint(id)`                        | Delete a breakpoint by id.                                                                                                                                              |
 | `debug_enable_breakpoint(id)` / `debug_disable_breakpoint(id)` | Enable or disable a breakpoint by id (disabled ones stay in the list but don't fire).                                                                          |
@@ -270,6 +270,7 @@ rest, which are honestly omitted.)
 | `debug_select_frame(frame)`                          | Select a stack frame (0 = innermost); subsequent context/registers/backtrace reflect it (persists). Caller frames report unwound pc/sp/fp + recoverable registers only. |
 | `debug_frame_up()` / `debug_frame_down()`            | Move one frame toward the caller / callee (gdb `up`/`down`), returning that frame's context.                                                                            |
 | `debug_read_memory(address, size)`                   | Read memory from the halted target as a hexdump. Errors clearly if the region is non-readable or unmapped.                                                              |
+| `debug_evaluate(expression)`                         | Evaluate an expression over registers and memory: arithmetic/comparison/boolean plus memory dereference (`[expr]`, `deref/u8..u64/i8..i64`). Returns hex + decimal, annotating a pointer that points at a string/function. |
 | `debug_set_register(name, value)`                    | Set a register in the halted target; verified by readback (returns old/new).                                                                                            |
 | `debug_write_memory(address, data)`                  | Write hex bytes to the halted target's **live process** memory (distinct from `patch_bytes`, which edits the static view). Non-writable/unmapped regions error; verified by readback. |
 | `debug_quit()`                                       | Terminate the running target.                                                                                                                                            |
@@ -333,6 +334,7 @@ Interactive debugging endpoints:
 - `/debug/runto?address=<addr>&timeout=<seconds>` (GET/POST): resume until an address is reached (blocking).
 - `/debug/pause` (GET/POST): break into a running target so it can be inspected.
 - `/debug/context`: full halted-state context (thread, registers, stack telescope, disasm-at-PC, backtrace). Auto-attached to run/continue/step stops unless `context=0`.
+- `/debug/evaluate?expression=<expr>` (GET/POST): evaluate an expression over registers and memory (arithmetic, comparison, boolean, and dereference `[expr]`/`deref`/`u8..u64`/`i8..i64`); returns hex + decimal with pointer annotations.
 - `/debug/setRegister?name=<reg>&value=<val>` (GET/POST): set a register; verified by readback.
 - `/debug/writeMemory?address=<addr>&data=<hex>` (GET/POST): write hex bytes to the live process; non-writable/unmapped regions error; verified by readback.
 - `/debug/status`: session status — active adapter (dialect), live/running, current ip/function when halted, breakpoint count. Works before launch.
