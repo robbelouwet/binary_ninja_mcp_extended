@@ -508,6 +508,22 @@ class DebuggerSession:
             "message": "Pause requested; the in-flight run/continue will return with the stop location.",
         }
 
+    def write_stdin(self, data: str) -> dict[str, Any]:
+        """Write ``data`` to the target's standard input (Linux/macOS).
+
+        Non-blocking and does NOT take the session lock, so it can feed input to
+        a target that is blocked reading stdin while a run/continue is in flight
+        in another request — the way a human types at a prompt. Add a trailing
+        newline yourself if the program reads a line.
+        """
+        if not self.is_live:
+            return {"status": "error", "message": "No live target. Run the program first."}
+        try:
+            self.controller.write_stdin(data)
+        except Exception as e:
+            return {"status": "error", "message": f"Failed to write stdin: {e}"}
+        return {"status": "ok", "bytes_written": len(data.encode("utf-8", errors="replace"))}
+
     def status(self) -> dict[str, Any]:
         """Session/adapter status, queryable at any time (no live target needed).
 

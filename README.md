@@ -258,6 +258,7 @@ rest, which are honestly omitted.)
 | `debug_step_out(timeout_seconds)`                    | Run until the current function returns to its caller ("finish"; blocking).                                                                                              |
 | `debug_run_to(address, timeout_seconds)`             | Resume until the target reaches an address ("advance"/"until"; blocking).                                                                                               |
 | `debug_pause()`                                      | Break into a running target (e.g. hung or looping) so it can be inspected; the in-flight run/continue returns with the stop location.                                  |
+| `debug_write_stdin(data)`                            | Write to the target's stdin (Linux/macOS) — feed an interactive prompt. Non-blocking; can be called while a `run`/`continue` is blocked on the target's read.          |
 | `debug_context()`                                    | Full pwndbg-style context of the halted target: active thread, registers, stack telescope, disassembly around PC, backtrace. Auto-attached to run/continue/step stops (pass `context=false` to omit). |
 | `debug_status()`                                     | Debugger session status: active adapter (dialect for `debug_backend_command`), live/running, current ip/function when halted, breakpoint count. Works before launch.        |
 | `debug_backend_command(command)`                     | Escape hatch: run a raw command in the underlying adapter console (LLDB/WinDbg). For capabilities not yet wrapped (e.g. watchpoints, memory maps). Returns adapter + output. |
@@ -333,6 +334,7 @@ Interactive debugging endpoints:
 - `/debug/stepout?timeout=<seconds>` (GET/POST): run until the current function returns (blocking).
 - `/debug/runto?address=<addr>&timeout=<seconds>` (GET/POST): resume until an address is reached (blocking).
 - `/debug/pause` (GET/POST): break into a running target so it can be inspected.
+- `/debug/stdin?data=<text>` (GET/POST): write to the target's stdin (feed an interactive prompt); non-blocking, works while a run/continue is blocked. POST preferred for newlines.
 - `/debug/context`: full halted-state context (thread, registers, stack telescope, disasm-at-PC, backtrace). Auto-attached to run/continue/step stops unless `context=0`.
 - `/debug/evaluate?expression=<expr>` (GET/POST): evaluate an expression over registers and memory (arithmetic, comparison, boolean, and dereference `[expr]`/`deref`/`u8..u64`/`i8..i64`); returns hex + decimal with pointer annotations.
 - `/debug/setRegister?name=<reg>&value=<val>` (GET/POST): set a register; verified by readback.

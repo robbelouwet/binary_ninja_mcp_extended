@@ -1247,6 +1247,17 @@ export function registerTools(server: McpServer, client: BinjaHttpClient): void 
   );
 
   server.tool(
+    "debug_write_stdin",
+    "Write data to the target's standard input (Linux/macOS). Feeds an interactive prompt like a human typing: non-blocking, and can be called WHILE a debug_run/debug_continue is blocked on the target's stdin read. Include a trailing newline (\\n) if the program reads a line. Pattern: run debug_continue with timeout_seconds=0 so it blocks at the read, then call this to satisfy it. Requires a live target.",
+    {
+      data: z.string().describe("Text to write to stdin (include \\n for a line)"),
+    },
+    async ({ data }) => ({
+      content: [{ type: "text", text: await client.post("debug/stdin", { data }) }],
+    })
+  );
+
+  server.tool(
     "debug_status",
     "Get debugger session status: the active backend adapter (LLDB/WinDbg — the command dialect for debug_backend_command), whether a target is live and running or halted, the current ip/function when halted, and how many breakpoints are set. Call this to learn the adapter dialect before using debug_backend_command. Works even before a target is launched.",
     {},

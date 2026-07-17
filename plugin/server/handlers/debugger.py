@@ -243,6 +243,18 @@ def status_route(req: Request):
     return _session(req).status()
 
 
+@route("/debug/stdin", methods=("GET", "POST"))
+def stdin_route(req: Request):
+    """Write data to the target's standard input (feed an interactive prompt).
+
+    Non-blocking; can be issued while a run/continue is blocked. POST preferred
+    for data with spaces/newlines.
+    """
+    session = _session(req)
+    data = req.require("data", "input", help="Required: data (text to write to stdin)")
+    return session.write_stdin(str(data))
+
+
 @route("/debug/backend", methods=("GET", "POST"))
 def backend_route(req: Request):
     """Run a raw command in the underlying debug adapter's (LLDB/WinDbg) console.

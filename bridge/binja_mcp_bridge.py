@@ -1221,6 +1221,22 @@ def debug_pause() -> str:
 
 
 @mcp.tool()
+def debug_write_stdin(data: str) -> str:
+    """
+    Write data to the target's standard input (Linux/macOS).
+
+    Feeds an interactive prompt the way a human types: it is non-blocking and can
+    be called WHILE a debug_run/debug_continue is blocked waiting on the target's
+    stdin read. Include a trailing newline (\\n) if the program reads a line.
+
+    Typical pattern for an input-reading target: start debug_continue with
+    timeout_seconds=0 (unbounded) so it blocks at the read, then call
+    debug_write_stdin("password\\n") to satisfy it. Requires a live target.
+    """
+    return _json_dump(safe_post_json("debug/stdin", {"data": data}))
+
+
+@mcp.tool()
 def debug_status() -> str:
     """
     Get debugger session status.

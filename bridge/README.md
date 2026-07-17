@@ -184,6 +184,7 @@ automatically.
 - `debug_step_out` - Run until the current function returns ("finish"; blocking)
 - `debug_run_to` - Resume until a given address ("advance"/"until"; blocking)
 - `debug_pause` - Break into a running (hung/looping) target
+- `debug_write_stdin` - Write to the target's stdin (feed an interactive prompt); works while a run/continue is blocked
 - `debug_context` - Full pwndbg-style context (thread, registers, stack telescope, disasm-at-PC, backtrace); auto-attached to stops
 - `debug_status` - Session status: active adapter (dialect), live/running, current ip/function, breakpoint count
 - `debug_backend_command` - Escape hatch: run a raw LLDB/WinDbg adapter command (e.g. watchpoints, memory maps)
