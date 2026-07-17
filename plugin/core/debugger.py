@@ -108,18 +108,26 @@ _FATAL_REASONS = {
 
 
 class Breakpoint:
-    """A user breakpoint tracked by the session (id, address, condition)."""
+    """A user breakpoint tracked by the session (id, address, symbol, condition)."""
 
-    def __init__(self, bp_id: int, address: int, condition: str | None = None):
+    def __init__(
+        self,
+        bp_id: int,
+        address: int,
+        condition: str | None = None,
+        symbol: str | None = None,
+    ):
         self.id = bp_id
         self.address = address
         self.condition = condition
+        self.symbol = symbol
         self.enabled = True
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "address": hex(self.address),
+            "symbol": self.symbol,
             "condition": self.condition,
             "enabled": self.enabled,
         }
@@ -149,18 +157,63 @@ class DebuggerSession:
 
     # ---------- breakpoints ----------
 
-    def add_breakpoint(self, address: int, condition: str | None = None) -> Breakpoint:
+    def resolve_location(self, ident: str) -> tuple[int, str | None]:
+        """Resolve a breakpoint location (address or symbol/function name).
+
+        Returns ``(address, symbol)`` where ``symbol`` is the resolved name (or
+        None when an address was given). Raises DebuggerError if unresolved.
+        """
+        s = (ident or "").strip()
+        if not s:
+            raise DebuggerError("Empty breakpoint location.")
+        # Numeric address (0x-prefixed or bare hex).
+        try:
+            if s.lower().startswith("0x"):
+                return int(s, 16), None
+            if all(c in "0123456789abcdefABCDEF" for c in s):
+                return int(s, 16), None
+        except ValueError:
+            pass
+        # Function by name.
+        try:
+            getter = getattr(self.bv, "get_functions_by_name", None)
+            funcs = getter(s) if callable(getter) else None
+            if funcs:
+                return int(funcs[0].start), funcs[0].name
+        except Exception:
+            pass
+        # Symbol by raw, then pretty, name.
+        for getter_name in ("get_symbol_by_raw_name", "get_symbol_by_name"):
+            try:
+                getter = getattr(self.bv, getter_name, None)
+                sym = getter(s) if callable(getter) else None
+                if sym and hasattr(sym, "address"):
+                    return int(sym.address), getattr(sym, "name", s)
+            except Exception:
+                pass
+        raise DebuggerError(f"Could not resolve breakpoint location: {ident!r}")
+
+    def add_breakpoint(
+        self, address: int, condition: str | None = None, symbol: str | None = None
+    ) -> Breakpoint:
         with self._lock:
-            # Reuse an existing breakpoint at this address; just update the condition.
+            # Reuse an existing breakpoint at this address; update its metadata.
             for bp in self._breakpoints.values():
                 if bp.address == address:
                     bp.condition = condition
+                    if symbol:
+                        bp.symbol = symbol
                     return bp
-            bp = Breakpoint(self._next_bp_id, address, condition)
+            bp = Breakpoint(self._next_bp_id, address, condition, symbol)
             self._next_bp_id += 1
             self._breakpoints[bp.id] = bp
             self.controller.add_breakpoint(address)
             return bp
+
+    def add_breakpoint_at(self, ident: str, condition: str | None = None) -> Breakpoint:
+        """Add a breakpoint by address or symbol/function name."""
+        address, symbol = self.resolve_location(ident)
+        return self.add_breakpoint(address, condition, symbol)
 
     def delete_breakpoint(self, bp_id: int) -> bool:
         with self._lock:
@@ -173,14 +226,32 @@ class DebuggerSession:
                 pass
             return True
 
+    def set_breakpoint_enabled(self, bp_id: int, enabled: bool) -> Breakpoint:
+        """Enable or disable a breakpoint by id."""
+        with self._lock:
+            bp = self._breakpoints.get(bp_id)
+            if bp is None:
+                raise DebuggerError(f"No breakpoint with id {bp_id}")
+            try:
+                if enabled:
+                    self.controller.enable_breakpoint(bp.address)
+                else:
+                    self.controller.disable_breakpoint(bp.address)
+            except Exception as e:
+                raise DebuggerError(
+                    f"Failed to {'enable' if enabled else 'disable'} breakpoint: {e}"
+                )
+            bp.enabled = enabled
+            return bp
+
     def list_breakpoints(self) -> list[dict[str, Any]]:
         with self._lock:
             return [bp.to_dict() for bp in sorted(self._breakpoints.values(), key=lambda b: b.id)]
 
-    def _breakpoint_at(self, address: int) -> Breakpoint | None:
+    def _breakpoint_at(self, address: int, enabled_only: bool = False) -> Breakpoint | None:
         with self._lock:
             for bp in self._breakpoints.values():
-                if bp.address == address:
+                if bp.address == address and (bp.enabled or not enabled_only):
                     return bp
         return None
 
@@ -614,7 +685,7 @@ class DebuggerSession:
         """
         if result["status"] != "breakpoint":
             return result
-        bp = self._breakpoint_at(int(result["address"], 16))
+        bp = self._breakpoint_at(int(result["address"], 16), enabled_only=True)
         if bp is None or not bp.condition:
             return result
         try:
@@ -659,17 +730,20 @@ class DebuggerSession:
         ip = _safe(lambda: self.controller.ip, default=None)
         addr_hex = hex(ip) if isinstance(ip, int) else None
         func = self._function_name(addr_hex)
-        bp = self._breakpoint_at(ip) if isinstance(ip, int) else None
+        # Only an ENABLED breakpoint claims a stop; a disabled one falls through.
+        bp = self._breakpoint_at(ip, enabled_only=True) if isinstance(ip, int) else None
 
         # 2. Clean stop at a breakpoint the client set — self-explanatory.
         if reason_name == "Breakpoint" and bp is not None:
-            where = f" in {func}" if func else ""
+            label = bp.symbol or func
+            where = f" in {label}" if label else ""
             result = {
                 "status": "breakpoint",
                 "stop_reason": reason_name,
                 "breakpoint_id": bp.id,
                 "address": addr_hex,
                 "function": func,
+                "symbol": bp.symbol,
                 "message": f"Stopped at breakpoint #{bp.id} ({addr_hex}){where}",
             }
             return self._attach_context(result, expected=True)

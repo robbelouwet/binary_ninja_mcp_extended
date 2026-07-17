@@ -29,7 +29,8 @@ def _address(req: Request, *names: str, help: str | None = None) -> int:
 def breakpoint_route(req: Request):
     """List (GET), add (POST) or delete (DELETE) a breakpoint.
 
-    POST params: address, optional condition (e.g. "rdi == 0x10").
+    POST params: location OR address (a hex/decimal address or a symbol/function
+    name), optional condition (e.g. "rdi == 0x10").
     DELETE params: id.
     """
     session = _session(req)
@@ -38,19 +39,56 @@ def breakpoint_route(req: Request):
         return {"breakpoints": session.list_breakpoints()}
 
     if req.method == "DELETE":
-        bp_id = req.require("id", help="Required: id of the breakpoint to delete")
-        try:
-            bp_id = int(bp_id)
-        except (ValueError, TypeError):
-            raise HTTPError(400, f"Invalid breakpoint id: {bp_id!r}")
+        bp_id = _bp_id(req)
         if session.delete_breakpoint(bp_id):
             return {"status": "ok", "message": f"Deleted breakpoint #{bp_id}"}
         raise HTTPError(404, f"No breakpoint with id {bp_id}")
 
-    # POST
-    address = _address(req, "address", "addr", help="Required: address (hex like 0x401000)")
+    # POST: accept a symbol/function name or an address, via `location`/`name`/`address`.
+    location = req.param("location", "name", "symbol", "address", "addr")
+    if not location:
+        raise HTTPError(
+            400,
+            {
+                "error": "Missing location",
+                "help": "Provide 'location' (a symbol/function name or address) or 'address'",
+            },
+        )
     condition = req.param("condition") or None
-    bp = session.add_breakpoint(address, condition)
+    try:
+        bp = session.add_breakpoint_at(str(location), condition)
+    except DebuggerError as e:
+        raise HTTPError(400, str(e))
+    return {"status": "ok", "breakpoint": bp.to_dict()}
+
+
+def _bp_id(req: Request) -> int:
+    raw = req.require("id", help="Required: id of the breakpoint")
+    try:
+        return int(raw)
+    except (ValueError, TypeError):
+        raise HTTPError(400, f"Invalid breakpoint id: {raw!r}")
+
+
+@route("/debug/breakpoint/enable", methods=("GET", "POST"))
+def enable_breakpoint_route(req: Request):
+    """Enable a breakpoint by id."""
+    session = _session(req)
+    try:
+        bp = session.set_breakpoint_enabled(_bp_id(req), True)
+    except DebuggerError as e:
+        raise HTTPError(400, str(e))
+    return {"status": "ok", "breakpoint": bp.to_dict()}
+
+
+@route("/debug/breakpoint/disable", methods=("GET", "POST"))
+def disable_breakpoint_route(req: Request):
+    """Disable a breakpoint by id (kept in the list, but stops there won't fire)."""
+    session = _session(req)
+    try:
+        bp = session.set_breakpoint_enabled(_bp_id(req), False)
+    except DebuggerError as e:
+        raise HTTPError(400, str(e))
     return {"status": "ok", "breakpoint": bp.to_dict()}
 
 

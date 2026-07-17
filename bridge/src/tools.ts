@@ -1110,13 +1110,13 @@ export function registerTools(server: McpServer, client: BinjaHttpClient): void 
 
   server.tool(
     "debug_set_breakpoint",
-    "Set a breakpoint at an address in the current binary. Optional condition (e.g. \"rdi == 0x10\") only stops when true.",
+    "Set a breakpoint in the current binary. The location is a symbol/function name (e.g. 'checkResponse', 'main') OR an address (hex like 0x401000 or decimal) — names are resolved against the analysis. Optional condition (e.g. \"rdi == 0x10\") only stops when true. Returns the breakpoint with its id, resolved address, and symbol.",
     {
-      address: z.string().describe("Address, hex like 0x401000 or decimal"),
+      location: z.string().describe("Symbol/function name, or address (hex 0x401000 or decimal)"),
       condition: z.string().default("").describe("Optional condition expression over registers"),
     },
-    async ({ address, condition = "" }) => {
-      const body: Record<string, unknown> = { address };
+    async ({ location, condition = "" }) => {
+      const body: Record<string, unknown> = { location };
       if (condition) body.condition = condition;
       return { content: [{ type: "text", text: await client.post("debug/breakpoint", body) }] };
     }
@@ -1138,6 +1138,24 @@ export function registerTools(server: McpServer, client: BinjaHttpClient): void 
     async ({ id }) => {
       return { content: [{ type: "text", text: await client.post("debug/breakpoint", { id, _method: "DELETE" }) }] };
     }
+  );
+
+  server.tool(
+    "debug_enable_breakpoint",
+    "Enable a previously disabled breakpoint by its id.",
+    {
+      id: z.number().describe("Breakpoint id to enable"),
+    },
+    async ({ id }) => jsonText(await client.getJson("debug/breakpoint/enable", { id }))
+  );
+
+  server.tool(
+    "debug_disable_breakpoint",
+    "Disable a breakpoint by its id without deleting it. It stays in the list but execution will not stop there until re-enabled.",
+    {
+      id: z.number().describe("Breakpoint id to disable"),
+    },
+    async ({ id }) => jsonText(await client.getJson("debug/breakpoint/disable", { id }))
   );
 
   server.tool(

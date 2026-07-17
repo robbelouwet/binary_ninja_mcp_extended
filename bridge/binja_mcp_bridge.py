@@ -1042,19 +1042,21 @@ def _json_dump(data) -> str:
 
 
 @mcp.tool()
-def debug_set_breakpoint(address: str, condition: str = "") -> str:
+def debug_set_breakpoint(location: str, condition: str = "") -> str:
     """
-    Set a breakpoint at an address in the current binary.
+    Set a breakpoint in the current binary.
 
-    - address: hex like "0x401000" or decimal.
+    - location: a symbol/function name (e.g. "checkResponse", "main") OR an
+      address (hex like "0x401000" or decimal). Names are resolved against the
+      analysis, so you can break on a function without looking up its address.
     - condition: optional expression evaluated when the breakpoint is hit;
       execution only stops if it is true. Registers and integer/hex literals
       with comparisons and arithmetic are supported, e.g. "rdi == 0x10" or
       "rax & 1 and rsi > 0". Leave empty for an unconditional breakpoint.
 
-    Returns the created breakpoint (with its id).
+    Returns the created breakpoint (with its id, resolved address, and symbol).
     """
-    params = {"address": address}
+    params = {"location": location}
     if condition:
         params["condition"] = condition
     return _json_dump(safe_post_json("debug/breakpoint", params))
@@ -1070,6 +1072,22 @@ def debug_list_breakpoints() -> str:
 def debug_delete_breakpoint(id: int) -> str:
     """Delete a breakpoint by its id (see debug_list_breakpoints)."""
     return _json_dump(safe_post_json("debug/breakpoint", {"id": id, "_method": "DELETE"}))
+
+
+@mcp.tool()
+def debug_enable_breakpoint(id: int) -> str:
+    """Enable a previously disabled breakpoint by its id."""
+    return _json_dump(get_json("debug/breakpoint/enable", {"id": id}))
+
+
+@mcp.tool()
+def debug_disable_breakpoint(id: int) -> str:
+    """
+    Disable a breakpoint by its id without deleting it.
+
+    It stays in the list but execution will not stop there until re-enabled.
+    """
+    return _json_dump(get_json("debug/breakpoint/disable", {"id": id}))
 
 
 def _ctx_params(timeout_seconds, context):

@@ -170,9 +170,10 @@ when it stops. `debug_run`/`debug_continue` block until the target next stops
 happened; unexpected stops (crash/signal/timeout) attach registers + backtrace
 automatically.
 
-- `debug_set_breakpoint` - Set a breakpoint, with an optional condition (e.g. `rdi == 0x10`)
+- `debug_set_breakpoint` - Set a breakpoint by symbol/function name or address, with an optional condition (e.g. `rdi == 0x10`)
 - `debug_list_breakpoints` - List breakpoints
 - `debug_delete_breakpoint` - Delete a breakpoint by id
+- `debug_enable_breakpoint` / `debug_disable_breakpoint` - Enable/disable a breakpoint by id without deleting it
 - `debug_run` - Launch and run until the next stop (blocking); `stop_at_entry` optional
 - `debug_continue` - Continue until the next stop (blocking)
 - `debug_step` - Single-instruction step into calls (blocking)
