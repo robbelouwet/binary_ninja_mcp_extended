@@ -66,6 +66,12 @@ def _timeout_param(req: Request) -> float | None:
     return None if value <= 0 else value
 
 
+def _context_param(req: Request) -> bool:
+    """Whether to attach the full context to the stop result (default true)."""
+    raw = req.param("context", default="")
+    return str(raw).lower() not in ("0", "false", "no")
+
+
 @route("/debug/run", methods=("GET", "POST"))
 def run_route(req: Request):
     """Launch the target and run until the next stop (blocking, bounded).
@@ -89,7 +95,9 @@ def run_route(req: Request):
         if req.params.get(key)
     }
     try:
-        return session.launch_and_run(stop_at_entry=stop_at_entry, timeout=timeout, **opts)
+        return session.launch_and_run(
+            stop_at_entry=stop_at_entry, timeout=timeout, context=_context_param(req), **opts
+        )
     except DebuggerError as e:
         raise HTTPError(400, str(e))
 
@@ -103,7 +111,17 @@ def continue_route(req: Request):
     session = _session(req)
     timeout = _timeout_param(req)
     try:
-        return session.resume(timeout=timeout)
+        return session.resume(timeout=timeout, context=_context_param(req))
+    except DebuggerError as e:
+        raise HTTPError(400, str(e))
+
+
+@route("/debug/context")
+def context_route(req: Request):
+    """The full halted-state context (thread, registers, stack, disasm, backtrace)."""
+    session = _session(req)
+    try:
+        return session.context()
     except DebuggerError as e:
         raise HTTPError(400, str(e))
 
@@ -161,7 +179,7 @@ def step_route(req: Request):
     """Execute a single instruction, stepping into calls (blocking, bounded)."""
     session = _session(req)
     try:
-        return session.step_into(timeout=_timeout_param(req))
+        return session.step_into(timeout=_timeout_param(req), context=_context_param(req))
     except DebuggerError as e:
         raise HTTPError(400, str(e))
 
@@ -171,7 +189,7 @@ def step_over_route(req: Request):
     """Execute a single instruction, stepping over calls (blocking, bounded)."""
     session = _session(req)
     try:
-        return session.step_over(timeout=_timeout_param(req))
+        return session.step_over(timeout=_timeout_param(req), context=_context_param(req))
     except DebuggerError as e:
         raise HTTPError(400, str(e))
 
@@ -181,7 +199,7 @@ def step_out_route(req: Request):
     """Run until the current function returns to its caller (blocking, bounded)."""
     session = _session(req)
     try:
-        return session.step_out(timeout=_timeout_param(req))
+        return session.step_out(timeout=_timeout_param(req), context=_context_param(req))
     except DebuggerError as e:
         raise HTTPError(400, str(e))
 
@@ -192,7 +210,7 @@ def run_to_route(req: Request):
     session = _session(req)
     address = _address(req, "address", "addr", help="Required: address to run to")
     try:
-        return session.run_to(address, timeout=_timeout_param(req))
+        return session.run_to(address, timeout=_timeout_param(req), context=_context_param(req))
     except DebuggerError as e:
         raise HTTPError(400, str(e))
 

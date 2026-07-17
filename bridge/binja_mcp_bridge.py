@@ -1072,6 +1072,13 @@ def debug_delete_breakpoint(id: int) -> str:
     return _json_dump(safe_post_json("debug/breakpoint", {"id": id, "_method": "DELETE"}))
 
 
+def _ctx_params(timeout_seconds, context):
+    p = {"timeout": timeout_seconds}
+    if not context:
+        p["context"] = "0"
+    return p
+
+
 def _http_timeout_for(run_timeout: float) -> float | None:
     """Client HTTP timeout: outlive the server-side pause timeout, or wait
     forever when the run is unbounded (run_timeout <= 0)."""
@@ -1082,6 +1089,7 @@ def _http_timeout_for(run_timeout: float) -> float | None:
 def debug_run(
     stop_at_entry: bool = False,
     timeout_seconds: float = 30,
+    context: bool = True,
     cmd_line: str = "",
     working_directory: str = "",
 ) -> str:
@@ -1110,6 +1118,8 @@ def debug_run(
     params = {"timeout": timeout_seconds}
     if stop_at_entry:
         params["stop_at_entry"] = "1"
+    if not context:
+        params["context"] = "0"
     if cmd_line:
         params["cmd_line"] = cmd_line
     if working_directory:
@@ -1118,19 +1128,18 @@ def debug_run(
 
 
 @mcp.tool()
-def debug_continue(timeout_seconds: float = 30) -> str:
+def debug_continue(timeout_seconds: float = 30, context: bool = True) -> str:
     """
     Continue a stopped target until it next stops (BLOCKING).
 
     Same stop-result shape and timeout_seconds semantics as debug_run. Requires
     a live target (call debug_run first).
     """
+    params = {"timeout": timeout_seconds}
+    if not context:
+        params["context"] = "0"
     return _json_dump(
-        get_json(
-            "debug/continue",
-            {"timeout": timeout_seconds},
-            timeout=_http_timeout_for(timeout_seconds),
-        )
+        get_json("debug/continue", params, timeout=_http_timeout_for(timeout_seconds))
     )
 
 
@@ -1209,7 +1218,7 @@ def debug_resolve_address(address: str) -> str:
 
 
 @mcp.tool()
-def debug_step(timeout_seconds: float = 30) -> str:
+def debug_step(timeout_seconds: float = 30, context: bool = True) -> str:
     """
     Execute a single instruction, stepping INTO calls (BLOCKING).
 
@@ -1218,13 +1227,15 @@ def debug_step(timeout_seconds: float = 30) -> str:
     """
     return _json_dump(
         get_json(
-            "debug/step", {"timeout": timeout_seconds}, timeout=_http_timeout_for(timeout_seconds)
+            "debug/step",
+            _ctx_params(timeout_seconds, context),
+            timeout=_http_timeout_for(timeout_seconds),
         )
     )
 
 
 @mcp.tool()
-def debug_step_over(timeout_seconds: float = 30) -> str:
+def debug_step_over(timeout_seconds: float = 30, context: bool = True) -> str:
     """
     Execute a single instruction, stepping OVER calls (BLOCKING).
 
@@ -1234,14 +1245,14 @@ def debug_step_over(timeout_seconds: float = 30) -> str:
     return _json_dump(
         get_json(
             "debug/stepover",
-            {"timeout": timeout_seconds},
+            _ctx_params(timeout_seconds, context),
             timeout=_http_timeout_for(timeout_seconds),
         )
     )
 
 
 @mcp.tool()
-def debug_step_out(timeout_seconds: float = 30) -> str:
+def debug_step_out(timeout_seconds: float = 30, context: bool = True) -> str:
     """
     Run until the current function returns to its caller, i.e. "finish" (BLOCKING).
 
@@ -1250,14 +1261,14 @@ def debug_step_out(timeout_seconds: float = 30) -> str:
     return _json_dump(
         get_json(
             "debug/stepout",
-            {"timeout": timeout_seconds},
+            _ctx_params(timeout_seconds, context),
             timeout=_http_timeout_for(timeout_seconds),
         )
     )
 
 
 @mcp.tool()
-def debug_run_to(address: str, timeout_seconds: float = 30) -> str:
+def debug_run_to(address: str, timeout_seconds: float = 30, context: bool = True) -> str:
     """
     Resume until the target reaches a given address, i.e. "advance"/"until" (BLOCKING).
 
@@ -1265,13 +1276,8 @@ def debug_run_to(address: str, timeout_seconds: float = 30) -> str:
 
     Same stop-result shape and timeout semantics as debug_run. Requires a live target.
     """
-    return _json_dump(
-        get_json(
-            "debug/runto",
-            {"address": address, "timeout": timeout_seconds},
-            timeout=_http_timeout_for(timeout_seconds),
-        )
-    )
+    params = {"address": address, **_ctx_params(timeout_seconds, context)}
+    return _json_dump(get_json("debug/runto", params, timeout=_http_timeout_for(timeout_seconds)))
 
 
 @mcp.tool()
@@ -1296,6 +1302,21 @@ def debug_get_backtrace() -> str:
     Requires the target to be stopped.
     """
     return _json_dump(get_json("debug/backtrace"))
+
+
+@mcp.tool()
+def debug_context() -> str:
+    """
+    Get the full pwndbg-style context of the halted target in one call.
+
+    Returns the active thread (tid + rip), the important registers, a stack
+    telescope (stack words from the stack pointer, with strings they point to),
+    the disassembly around the current PC, and the backtrace. This is what
+    debug_run/debug_continue/step attach to their stop result by default (pass
+    context=false there to omit it and call this on demand instead). Requires a
+    stopped target.
+    """
+    return _json_dump(get_json("debug/context"))
 
 
 @mcp.tool()

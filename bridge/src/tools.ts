@@ -1101,6 +1101,11 @@ export function registerTools(server: McpServer, client: BinjaHttpClient): void 
   // Client HTTP timeout (ms) that outlives the server-side pause timeout, or
   // 0 (no timeout) for an unbounded run.
   const httpTimeoutMs = (runTimeout: number): number => (runTimeout <= 0 ? 0 : (runTimeout + 20) * 1000);
+  const runParams = (timeoutSeconds: number, context: boolean, extra: Record<string, string | number> = {}): Record<string, string | number> => ({
+    timeout: timeoutSeconds,
+    ...(context ? {} : { context: "0" }),
+    ...extra,
+  });
   const jsonText = (data: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] });
 
   server.tool(
@@ -1141,12 +1146,14 @@ export function registerTools(server: McpServer, client: BinjaHttpClient): void 
     {
       stop_at_entry: z.boolean().default(false).describe("Halt at the program entry point instead of the first breakpoint"),
       timeout_seconds: z.number().default(30).describe("Auto-pause after this many seconds (0 = wait indefinitely)"),
+      context: z.boolean().default(true).describe("Attach the full context (thread/registers/stack/disasm/backtrace) to the stop result"),
       cmd_line: z.string().default("").describe("Command-line arguments for the target"),
       working_directory: z.string().default("").describe("Working directory to launch in"),
     },
-    async ({ stop_at_entry = false, timeout_seconds = 30, cmd_line = "", working_directory = "" }) => {
+    async ({ stop_at_entry = false, timeout_seconds = 30, context = true, cmd_line = "", working_directory = "" }) => {
       const params: Record<string, string | number> = { timeout: timeout_seconds };
       if (stop_at_entry) params.stop_at_entry = "1";
+      if (!context) params.context = "0";
       if (cmd_line) params.cmd_line = cmd_line;
       if (working_directory) params.working_directory = working_directory;
       return jsonText(await client.getJson("debug/run", params, httpTimeoutMs(timeout_seconds)));
@@ -1158,9 +1165,10 @@ export function registerTools(server: McpServer, client: BinjaHttpClient): void 
     "Continue a stopped target until it next stops (BLOCKING). Same stop-result and timeout_seconds semantics as debug_run.",
     {
       timeout_seconds: z.number().default(30).describe("Auto-pause after this many seconds (0 = wait indefinitely)"),
+      context: z.boolean().default(true).describe("Attach the full context to the stop result"),
     },
-    async ({ timeout_seconds = 30 }) => {
-      return jsonText(await client.getJson("debug/continue", { timeout: timeout_seconds }, httpTimeoutMs(timeout_seconds)));
+    async ({ timeout_seconds = 30, context = true }) => {
+      return jsonText(await client.getJson("debug/continue", runParams(timeout_seconds, context), httpTimeoutMs(timeout_seconds)));
     }
   );
 
@@ -1210,9 +1218,10 @@ export function registerTools(server: McpServer, client: BinjaHttpClient): void 
     "Execute a single instruction, stepping INTO calls (BLOCKING). Returns where execution landed (same stop-result shape as debug_run). Requires a stopped target.",
     {
       timeout_seconds: z.number().default(30).describe("Auto-pause after this many seconds (0 = wait indefinitely)"),
+      context: z.boolean().default(true).describe("Attach the full context to the stop result"),
     },
-    async ({ timeout_seconds = 30 }) =>
-      jsonText(await client.getJson("debug/step", { timeout: timeout_seconds }, httpTimeoutMs(timeout_seconds)))
+    async ({ timeout_seconds = 30, context = true }) =>
+      jsonText(await client.getJson("debug/step", runParams(timeout_seconds, context), httpTimeoutMs(timeout_seconds)))
   );
 
   server.tool(
@@ -1220,9 +1229,10 @@ export function registerTools(server: McpServer, client: BinjaHttpClient): void 
     "Execute a single instruction, stepping OVER calls (BLOCKING). A call runs to completion before stopping. Requires a stopped target.",
     {
       timeout_seconds: z.number().default(30).describe("Auto-pause after this many seconds (0 = wait indefinitely)"),
+      context: z.boolean().default(true).describe("Attach the full context to the stop result"),
     },
-    async ({ timeout_seconds = 30 }) =>
-      jsonText(await client.getJson("debug/stepover", { timeout: timeout_seconds }, httpTimeoutMs(timeout_seconds)))
+    async ({ timeout_seconds = 30, context = true }) =>
+      jsonText(await client.getJson("debug/stepover", runParams(timeout_seconds, context), httpTimeoutMs(timeout_seconds)))
   );
 
   server.tool(
@@ -1230,9 +1240,10 @@ export function registerTools(server: McpServer, client: BinjaHttpClient): void 
     "Run until the current function returns to its caller, i.e. \"finish\" (BLOCKING). Requires a stopped target.",
     {
       timeout_seconds: z.number().default(30).describe("Auto-pause after this many seconds (0 = wait indefinitely)"),
+      context: z.boolean().default(true).describe("Attach the full context to the stop result"),
     },
-    async ({ timeout_seconds = 30 }) =>
-      jsonText(await client.getJson("debug/stepout", { timeout: timeout_seconds }, httpTimeoutMs(timeout_seconds)))
+    async ({ timeout_seconds = 30, context = true }) =>
+      jsonText(await client.getJson("debug/stepout", runParams(timeout_seconds, context), httpTimeoutMs(timeout_seconds)))
   );
 
   server.tool(
@@ -1241,9 +1252,10 @@ export function registerTools(server: McpServer, client: BinjaHttpClient): void 
     {
       address: z.string().describe("Address, hex like 0x401000 or decimal"),
       timeout_seconds: z.number().default(30).describe("Auto-pause after this many seconds (0 = wait indefinitely)"),
+      context: z.boolean().default(true).describe("Attach the full context to the stop result"),
     },
-    async ({ address, timeout_seconds = 30 }) =>
-      jsonText(await client.getJson("debug/runto", { address, timeout: timeout_seconds }, httpTimeoutMs(timeout_seconds)))
+    async ({ address, timeout_seconds = 30, context = true }) =>
+      jsonText(await client.getJson("debug/runto", runParams(timeout_seconds, context, { address }), httpTimeoutMs(timeout_seconds)))
   );
 
   server.tool(
@@ -1261,6 +1273,13 @@ export function registerTools(server: McpServer, client: BinjaHttpClient): void 
     "Get the call stack (backtrace) of the halted target's active thread. Requires the target to be stopped.",
     {},
     async () => jsonText(await client.getJson("debug/backtrace"))
+  );
+
+  server.tool(
+    "debug_context",
+    "Get the full pwndbg-style context of the halted target in one call: active thread (tid+rip), important registers, a stack telescope (stack words with strings they point to), disassembly around the current PC, and the backtrace. This is what run/continue/step attach to their stop result by default (pass context=false there to omit and call this on demand). Requires a stopped target.",
+    {},
+    async () => jsonText(await client.getJson("debug/context"))
   );
 
   server.tool(

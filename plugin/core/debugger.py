@@ -32,6 +32,9 @@ _LLDB_REGION_RE = re.compile(r"\[0x([0-9A-Fa-f]+)-0x([0-9A-Fa-f]+)\)\s*(\S+)?\s*
 # to an image.
 _MAX_IMAGE_SIZE = 1 << 34  # 16 GiB
 
+# LLDB colorizes disassembly with ANSI escape codes; strip them from captured text.
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
 # Binary Ninja setting controlling the debugger's automatic stop at the program
 # entry point. Toggling it (rather than "skipping the first breakpoint") is the
 # only reliable way to suppress ONLY the entry-point stop: with it off, the stop
@@ -139,6 +142,10 @@ class DebuggerSession:
         # True while a run/continue is blocked in a wait. Prevents overlapping
         # runs and lets inspection report a clear "target is running" error.
         self._running = False
+        # Whether the current run attaches the full context (thread + registers +
+        # stack telescope + disasm-at-PC + backtrace) to its stop result. Set per
+        # run; safe as a plain attribute because only one run is active at a time.
+        self._include_context = True
 
     # ---------- breakpoints ----------
 
@@ -183,6 +190,7 @@ class DebuggerSession:
         self,
         stop_at_entry: bool = False,
         timeout: float | None = DEFAULT_RUN_TIMEOUT,
+        context: bool = True,
         **launch_opts,
     ) -> dict[str, Any]:
         """Launch the target from scratch and run until the next stop.
@@ -196,11 +204,14 @@ class DebuggerSession:
         or long-running target can always be inspected). ``timeout=None`` waits
         indefinitely (only interruptible via an explicit pause).
 
+        ``context=True`` (default) attaches the full context to the stop result.
+
         launch_opts may include: cmd_line (str), working_directory (str),
         adapter_type (str).
         """
         if not self._begin_run():
             return _busy_result()
+        self._include_context = context
         try:
             with self._lock:
                 self._apply_launch_opts(launch_opts)
@@ -218,34 +229,47 @@ class DebuggerSession:
         finally:
             self._end_run()
 
-    def resume(self, timeout: float | None = DEFAULT_RUN_TIMEOUT) -> dict[str, Any]:
+    def resume(
+        self, timeout: float | None = DEFAULT_RUN_TIMEOUT, context: bool = True
+    ) -> dict[str, Any]:
         """Continue a running target until the next stop (see launch_and_run)."""
         if not self.is_live:
             return {"status": "error", "message": "No live target. Run the program first."}
         if not self._begin_run():
             return _busy_result()
+        self._include_context = context
         try:
             return self._continue_loop(timeout)
         finally:
             self._end_run()
 
-    def step_into(self, timeout: float | None = DEFAULT_RUN_TIMEOUT) -> dict[str, Any]:
+    def step_into(
+        self, timeout: float | None = DEFAULT_RUN_TIMEOUT, context: bool = True
+    ) -> dict[str, Any]:
         """Execute a single instruction, stepping into calls."""
-        return self._step_control(self.controller.step_into_and_wait, timeout)
+        return self._step_control(self.controller.step_into_and_wait, timeout, context)
 
-    def step_over(self, timeout: float | None = DEFAULT_RUN_TIMEOUT) -> dict[str, Any]:
+    def step_over(
+        self, timeout: float | None = DEFAULT_RUN_TIMEOUT, context: bool = True
+    ) -> dict[str, Any]:
         """Execute a single instruction, stepping over calls."""
-        return self._step_control(self.controller.step_over_and_wait, timeout)
+        return self._step_control(self.controller.step_over_and_wait, timeout, context)
 
-    def step_out(self, timeout: float | None = DEFAULT_RUN_TIMEOUT) -> dict[str, Any]:
+    def step_out(
+        self, timeout: float | None = DEFAULT_RUN_TIMEOUT, context: bool = True
+    ) -> dict[str, Any]:
         """Run until the current function returns to its caller (finish)."""
-        return self._step_control(self.controller.step_return_and_wait, timeout)
+        return self._step_control(self.controller.step_return_and_wait, timeout, context)
 
-    def run_to(self, address: int, timeout: float | None = DEFAULT_RUN_TIMEOUT) -> dict[str, Any]:
+    def run_to(
+        self, address: int, timeout: float | None = DEFAULT_RUN_TIMEOUT, context: bool = True
+    ) -> dict[str, Any]:
         """Resume until the target reaches ``address`` (advance/until)."""
-        return self._step_control(lambda: self.controller.run_to_and_wait(address), timeout)
+        return self._step_control(
+            lambda: self.controller.run_to_and_wait(address), timeout, context
+        )
 
-    def _step_control(self, wait_fn, timeout: float | None) -> dict[str, Any]:
+    def _step_control(self, wait_fn, timeout: float | None, context: bool = True) -> dict[str, Any]:
         """Run one blocking step/advance op and report where it stopped.
 
         Reuses the run machinery (single-run guard, timeout auto-pause,
@@ -256,6 +280,7 @@ class DebuggerSession:
             return {"status": "error", "message": "No live target. Run the program first."}
         if not self._begin_run():
             return _busy_result()
+        self._include_context = context
         try:
             reason, timed_out = self._wait(wait_fn, timeout)
             if timed_out:
@@ -564,9 +589,9 @@ class DebuggerSession:
         can see exactly where it is (e.g. a hang) and then inspect, continue, or
         quit.
         """
-        ctx = self.state_snapshot()
-        addr = ctx.get("ip")
-        return {
+        ip = _safe(lambda: self.controller.ip, default=None)
+        addr = hex(ip) if isinstance(ip, int) else None
+        result = {
             "status": "paused",
             "stop_reason": "Timeout",
             "timed_out": True,
@@ -576,9 +601,9 @@ class DebuggerSession:
                 f"Target still running after timeout; paused at {addr}. "
                 "It may be hung or doing long work — inspect the backtrace, continue, or quit."
             ),
-            "registers": ctx.get("registers"),
-            "backtrace": ctx.get("backtrace"),
         }
+        # A timeout-pause is an unexpected halt: always keep at least regs+bt.
+        return self._attach_context(result, expected=False)
 
     def _filter_stop(self, result: dict[str, Any]) -> dict[str, Any] | None:
         """Apply conditional-breakpoint filtering to a stop result.
@@ -619,7 +644,7 @@ class DebuggerSession:
     def _resolve_stop(self, reason) -> dict[str, Any]:
         reason_name = _reason_name(reason)
 
-        # 1. The process is gone — the exit code is the whole story.
+        # 1. The process is gone — the exit code is the whole story (no context).
         if reason_name in _EXIT_REASONS:
             code = _safe(lambda: self.controller.exit_code, default=None)
             return {
@@ -639,7 +664,7 @@ class DebuggerSession:
         # 2. Clean stop at a breakpoint the client set — self-explanatory.
         if reason_name == "Breakpoint" and bp is not None:
             where = f" in {func}" if func else ""
-            return {
+            result = {
                 "status": "breakpoint",
                 "stop_reason": reason_name,
                 "breakpoint_id": bp.id,
@@ -647,23 +672,23 @@ class DebuggerSession:
                 "function": func,
                 "message": f"Stopped at breakpoint #{bp.id} ({addr_hex}){where}",
             }
+            return self._attach_context(result, expected=True)
 
         # 3. Other clean, expected stops (single step, requested entry stop).
         if reason_name in _CLEAN_STOP_REASONS:
-            return {
+            result = {
                 "status": "stopped",
                 "stop_reason": reason_name,
                 "address": addr_hex,
                 "function": func,
                 "message": f"Stopped ({reason_name}) at {addr_hex}",
             }
+            return self._attach_context(result, expected=True)
 
-        # 4. EVERYTHING else is unexpected — a signal, an exception, a
-        # breakpoint we did not set, or a reason we never anticipated
-        # (including UnknownReason). Always attach full context so the client
-        # can see why the target stopped and never has to guess.
-        ctx = self.state_snapshot()
-        ctx_addr = ctx.get("ip") or addr_hex
+        # 4. EVERYTHING else is unexpected — a signal, an exception, a breakpoint
+        # we did not set, or a reason we never anticipated (including
+        # UnknownReason). These always carry at least registers + backtrace so
+        # the client never has to guess why the target stopped.
         is_fatal = reason_name in _FATAL_REASONS
         is_signal = reason_name.startswith("Signal") or reason_name.startswith("Exc")
         status = "crashed" if is_fatal else ("signal" if is_signal else "stopped")
@@ -673,16 +698,31 @@ class DebuggerSession:
             headline = f"Target stopped on signal {reason_name}"
         else:
             headline = f"Target stopped unexpectedly ({reason_name})"
-        return {
+        result = {
             "status": status,
             "stop_reason": reason_name,
             "signal": reason_name if is_signal or is_fatal else None,
-            "address": ctx_addr,
-            "function": self._function_name(ctx_addr),
-            "message": f"{headline} at {ctx_addr}",
-            "registers": ctx.get("registers"),
-            "backtrace": ctx.get("backtrace"),
+            "address": addr_hex,
+            "function": func,
+            "message": f"{headline} at {addr_hex}",
         }
+        return self._attach_context(result, expected=False)
+
+    def _attach_context(self, result: dict[str, Any], expected: bool) -> dict[str, Any]:
+        """Attach state to a halted stop result.
+
+        With context enabled (default), attaches the full context (thread,
+        registers, stack telescope, disasm-at-PC, backtrace). With it disabled,
+        expected stops stay lean, but UNEXPECTED stops still get registers +
+        backtrace — the visibility guarantee is never traded away.
+        """
+        if self._include_context:
+            result.update(self._build_context())
+        elif not expected:
+            snap = self.state_snapshot()
+            result["registers"] = snap.get("registers")
+            result["backtrace"] = snap.get("backtrace")
+        return result
 
     # ---------- inspection ----------
 
@@ -747,6 +787,101 @@ class DebuggerSession:
             "registers": _safe(self._register_dicts, default=None),
             "backtrace": _safe(self._backtrace_dicts, default=None),
         }
+
+    # ---------- context view ----------
+
+    def context(self) -> dict[str, Any]:
+        """The full halted-state context, on demand (requires a stopped target)."""
+        with self._lock:
+            self._require_halted()
+            ip = _safe(lambda: self.controller.ip, default=None)
+            addr = hex(ip) if isinstance(ip, int) else None
+            result = {"status": "ok", "address": addr, "function": self._function_name(addr)}
+            result.update(self._build_context())
+            return result
+
+    def _build_context(self) -> dict[str, Any]:
+        """Assemble the pwndbg-style context of the halted target."""
+        return {
+            "thread": _safe(self._active_thread_info, default=None),
+            "registers": _safe(self._register_dicts, default=None),
+            "stack": _safe(self._stack_telescope, default=None),
+            "disassembly": _safe(self._disasm_at_pc, default=None),
+            "backtrace": _safe(self._backtrace_dicts, default=None),
+        }
+
+    def _active_thread_info(self) -> dict[str, Any] | None:
+        t = self.controller.active_thread
+        rip = getattr(t, "rip", None)
+        return {"tid": getattr(t, "tid", None), "rip": hex(rip) if isinstance(rip, int) else None}
+
+    def _stack_pointer(self) -> int | None:
+        regs = self.controller.regs.regs
+        for name in ("rsp", "esp", "sp"):
+            if name in regs:
+                return regs[name].value
+        return None
+
+    def _stack_telescope(self, count: int = 8) -> list[dict[str, Any]] | None:
+        """Dump ``count`` pointer-sized words from the stack pointer, annotating
+        any slot that points at a readable string."""
+        sp = self._stack_pointer()
+        if not isinstance(sp, int):
+            return None
+        out = []
+        for i in range(count):
+            addr = sp + i * 8
+            raw = _safe(lambda a=addr: self.controller.read_memory(a, 8), default=None)
+            if raw is None:
+                break
+            b = bytes(raw)
+            if len(b) < 8:
+                break
+            value = int.from_bytes(b[:8], "little")
+            entry = {"address": hex(addr), "value": hex(value)}
+            s = self._maybe_string(value)
+            if s is not None:
+                entry["points_to"] = s
+            out.append(entry)
+        return out or None
+
+    def _maybe_string(self, pointer: int, maxlen: int = 48) -> str | None:
+        """If ``pointer`` points at a run of printable bytes, return that string."""
+        if not isinstance(pointer, int) or pointer == 0:
+            return None
+        raw = _safe(lambda: self.controller.read_memory(pointer, maxlen), default=None)
+        if raw is None:
+            return None
+        chars = []
+        for ch in bytes(raw):
+            if ch == 0:
+                break
+            if 32 <= ch <= 126:
+                chars.append(chr(ch))
+            else:
+                return None
+        text = "".join(chars)
+        return text if len(text) >= 4 else None
+
+    def _disasm_at_pc(self, count: int = 8) -> str | None:
+        """Disassemble ``count`` instructions at the runtime PC via the adapter.
+
+        Uses the adapter's own disassembler (live memory), so it is correct
+        regardless of ASLR/PIE. Returns the adapter's raw text.
+        """
+        ip = _safe(lambda: self.controller.ip, default=None)
+        if not isinstance(ip, int):
+            return None
+        adapter = (_safe(lambda: self.controller.adapter_type, default="") or "").upper()
+        if "DBGENG" in adapter or "WINDBG" in adapter:
+            cmd = f"u {hex(ip)} L{count}"
+        else:
+            cmd = f"disassemble -s {hex(ip)} -c {count}"
+        out = _safe(lambda: self.controller.execute_backend_command(cmd), default=None)
+        if not isinstance(out, str):
+            return None
+        out = _ANSI_RE.sub("", out).strip()
+        return out or None
 
     # ---------- lifecycle ----------
 

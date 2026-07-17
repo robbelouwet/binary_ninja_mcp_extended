@@ -227,6 +227,13 @@ using a debugger by hand. `run`/`continue` **block** until the target next stops
 (a breakpoint, exit, crash, or the timeout), so the returned stop result always
 tells you exactly what happened.
 
+Every halted stop auto-attaches a **pwndbg-style context** — active thread,
+registers, a stack telescope, the disassembly around the current PC, and the
+backtrace — so one call shows the whole picture. Pass `context=false` on
+`run`/`continue`/`step` to omit it (useful for tight stepping loops), or call
+`debug_context` on demand. Unexpected stops (crash/signal) always keep registers
+and backtrace even with context off.
+
 | Function                                             | Description                                                                                                                                                             |
 | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `debug_set_breakpoint(address, condition)`           | Set a breakpoint. Optional `condition` (e.g. `"rdi == 0x10"`) only stops when true; registers, integer/hex literals, comparisons and arithmetic are supported.        |
@@ -239,6 +246,7 @@ tells you exactly what happened.
 | `debug_step_out(timeout_seconds)`                    | Run until the current function returns to its caller ("finish"; blocking).                                                                                              |
 | `debug_run_to(address, timeout_seconds)`             | Resume until the target reaches an address ("advance"/"until"; blocking).                                                                                               |
 | `debug_pause()`                                      | Break into a running target (e.g. hung or looping) so it can be inspected; the in-flight run/continue returns with the stop location.                                  |
+| `debug_context()`                                    | Full pwndbg-style context of the halted target: active thread, registers, stack telescope, disassembly around PC, backtrace. Auto-attached to run/continue/step stops (pass `context=false` to omit). |
 | `debug_status()`                                     | Debugger session status: active adapter (dialect for `debug_backend_command`), live/running, current ip/function when halted, breakpoint count. Works before launch.        |
 | `debug_backend_command(command)`                     | Escape hatch: run a raw command in the underlying adapter console (LLDB/WinDbg). For capabilities not yet wrapped (e.g. watchpoints, memory maps). Returns adapter + output. |
 | `debug_list_modules()`                               | List the images loaded in the target (executable + shared libraries) with runtime load base and size.                                                                       |
@@ -303,6 +311,7 @@ Interactive debugging endpoints:
 - `/debug/stepout?timeout=<seconds>` (GET/POST): run until the current function returns (blocking).
 - `/debug/runto?address=<addr>&timeout=<seconds>` (GET/POST): resume until an address is reached (blocking).
 - `/debug/pause` (GET/POST): break into a running target so it can be inspected.
+- `/debug/context`: full halted-state context (thread, registers, stack telescope, disasm-at-PC, backtrace). Auto-attached to run/continue/step stops unless `context=0`.
 - `/debug/status`: session status — active adapter (dialect), live/running, current ip/function when halted, breakpoint count. Works before launch.
 - `/debug/backend?command=<cmd>` (GET/POST): run a raw command in the underlying adapter console (LLDB/WinDbg); returns the active adapter and its output. POST preferred for commands with spaces.
 - `/debug/modules`: list images loaded in the target (executable + shared libraries) with runtime base and size.
