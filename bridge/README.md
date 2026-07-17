@@ -193,6 +193,8 @@ automatically.
 - `debug_get_backtrace` - Get the call stack of a halted thread (tid 0 = active)
 - `debug_list_threads` - List the target's threads (tid, rip, function, active)
 - `debug_select_thread` - Make a thread active; subsequent inspection targets it
+- `debug_select_frame` - Select a stack frame; context/registers/backtrace reflect it (persists)
+- `debug_frame_up` / `debug_frame_down` - Move one frame toward the caller / callee (gdb up/down)
 - `debug_read_memory` - Read memory from the halted target as a hexdump (errors on non-readable/unmapped)
 - `debug_set_register` - Set a register in the halted target (verified by readback)
 - `debug_write_memory` - Write bytes to the halted target's live process memory (non-writable/unmapped regions error)

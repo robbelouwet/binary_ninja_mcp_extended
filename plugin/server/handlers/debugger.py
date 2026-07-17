@@ -372,6 +372,41 @@ def select_thread_route(req: Request):
         raise HTTPError(400, str(e))
 
 
+@route("/debug/frame/select", methods=("GET", "POST"))
+def select_frame_route(req: Request):
+    """Select a stack frame by index; subsequent inspection reflects it."""
+    session = _session(req)
+    idx_raw = req.require("frame", "index", help="Required: frame (stack frame index, 0=innermost)")
+    try:
+        index = int(idx_raw)
+    except (ValueError, TypeError):
+        raise HTTPError(400, f"Invalid frame index: {idx_raw!r}")
+    try:
+        return session.select_frame(index)
+    except DebuggerError as e:
+        raise HTTPError(400, str(e))
+
+
+@route("/debug/frame/up", methods=("GET", "POST"))
+def frame_up_route(req: Request):
+    """Move one frame toward the caller (older frame)."""
+    session = _session(req)
+    try:
+        return session.frame_up()
+    except DebuggerError as e:
+        raise HTTPError(400, str(e))
+
+
+@route("/debug/frame/down", methods=("GET", "POST"))
+def frame_down_route(req: Request):
+    """Move one frame toward the callee (newer frame)."""
+    session = _session(req)
+    try:
+        return session.frame_down()
+    except DebuggerError as e:
+        raise HTTPError(400, str(e))
+
+
 @route("/debug/memory")
 def memory_route(req: Request):
     """Read memory from the halted target as a hexdump (plain text via ?raw=0)."""

@@ -1361,6 +1361,29 @@ export function registerTools(server: McpServer, client: BinjaHttpClient): void 
   );
 
   server.tool(
+    "debug_select_frame",
+    "Select a stack frame by index (0 = innermost) as the inspection context. Returns that frame's context (pc, function, registers, stack, disassembly, backtrace). The selection PERSISTS: subsequent debug_context / debug_get_registers / debug_get_backtrace reflect it until changed or the target runs again. For a caller frame, pc/sp/fp are reliably unwound but a full register set is not available (only recoverable registers are shown). Requires the target to be stopped.",
+    {
+      frame: z.number().describe("Stack frame index; 0 = innermost"),
+    },
+    async ({ frame }) => jsonText(await client.getJson("debug/frame/select", { frame }))
+  );
+
+  server.tool(
+    "debug_frame_up",
+    "Move one stack frame toward the caller (older frame) and show its context. Like gdb's 'up'. Requires the target to be stopped.",
+    {},
+    async () => jsonText(await client.getJson("debug/frame/up"))
+  );
+
+  server.tool(
+    "debug_frame_down",
+    "Move one stack frame toward the callee (newer frame) and show its context. Like gdb's 'down'. Requires the target to be stopped.",
+    {},
+    async () => jsonText(await client.getJson("debug/frame/down"))
+  );
+
+  server.tool(
     "debug_context",
     "Get the full pwndbg-style context of the halted target in one call: active thread (tid+rip), important registers, a stack telescope (stack words with strings they point to), disassembly around the current PC, and the backtrace. This is what run/continue/step attach to their stop result by default (pass context=false there to omit and call this on demand). Requires a stopped target.",
     {},

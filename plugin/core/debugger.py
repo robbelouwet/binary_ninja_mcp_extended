@@ -191,6 +191,9 @@ class DebuggerSession:
         # stack telescope + disasm-at-PC + backtrace) to its stop result. Set per
         # run; safe as a plain attribute because only one run is active at a time.
         self._include_context = True
+        # Currently selected stack frame for inspection (0 = innermost). Persists
+        # across inspection calls; reset to 0 on each run (a new stop starts at 0).
+        self._selected_frame = 0
 
     # ---------- breakpoints ----------
 
@@ -773,6 +776,8 @@ class DebuggerSession:
             if self._running:
                 return False
             self._running = True
+            # A new run/stop starts inspection at the innermost frame.
+            self._selected_frame = 0
             return True
 
     def _end_run(self) -> None:
@@ -971,6 +976,9 @@ class DebuggerSession:
     def get_registers(self, full: bool = False) -> list[dict[str, Any]]:
         with self._lock:
             self._require_halted()
+            # A selected caller frame reports its recoverable unwound registers.
+            if self._selected_frame != 0:
+                return self._frame_registers(self._selected_frame) or []
             return self._format_registers(full=full)
 
     def _format_registers(self, full: bool = False) -> list[dict[str, Any]]:
@@ -1002,6 +1010,8 @@ class DebuggerSession:
             if tid is None:
                 tid = self.controller.active_thread.tid
             frames = self.controller.frames_of_thread(tid)
+            # Mark the selected frame only for the active thread's backtrace.
+            active = tid == _safe(lambda: self.controller.active_thread.tid, default=None)
             out = []
             for f in frames:
                 out.append(
@@ -1013,6 +1023,7 @@ class DebuggerSession:
                         "function": f.func_name or None,
                         "func_start": hex(f.func_start) if f.func_start else None,
                         "module": f.module or None,
+                        "selected": active and f.index == self._selected_frame,
                     }
                 )
             return out
@@ -1059,6 +1070,91 @@ class DebuggerSession:
                 "rip": rip_hex,
                 "function": self._function_name(rip_hex),
             }
+
+    # ---------- stack frames ----------
+
+    def _frames(self) -> list:
+        tid = self.controller.active_thread.tid
+        return list(self.controller.frames_of_thread(tid))
+
+    def select_frame(self, index: int) -> dict[str, Any]:
+        """Select stack frame ``index`` (0 = innermost) as the inspection context.
+
+        Persists across inspection calls (registers, backtrace, context, stack,
+        disassembly) until changed or the target runs again. For a caller frame
+        the pc/sp/fp are reliably unwound by Binary Ninja; a full register set is
+        NOT available (the callee clobbered most registers), so only the
+        recoverable/callee-saved registers are reported.
+        """
+        with self._lock:
+            self._require_halted()
+            frames = self._frames()
+            if index < 0 or index >= len(frames):
+                raise DebuggerError(f"No frame #{index}; backtrace has {len(frames)} frame(s).")
+            # Keep the adapter's selected frame in sync (used for unwound registers).
+            _safe(
+                lambda: self.controller.execute_backend_command(f"frame select {index}"),
+                default=None,
+            )
+            self._selected_frame = index
+            return self._frame_context(index, frames)
+
+    def frame_up(self) -> dict[str, Any]:
+        """Move one frame toward the caller (older frame)."""
+        with self._lock:
+            return self.select_frame(self._selected_frame + 1)
+
+    def frame_down(self) -> dict[str, Any]:
+        """Move one frame toward the callee (newer frame)."""
+        with self._lock:
+            if self._selected_frame == 0:
+                raise DebuggerError("Already at the innermost frame (#0).")
+            return self.select_frame(self._selected_frame - 1)
+
+    def _frame_context(self, index: int, frames: list) -> dict[str, Any]:
+        f = frames[index]
+        pc_hex = hex(f.pc)
+        return {
+            "status": "ok",
+            "selected_frame": index,
+            "address": pc_hex,
+            "function": f.func_name or self._function_name(pc_hex),
+            "frame": {
+                "index": index,
+                "pc": pc_hex,
+                "sp": hex(f.sp),
+                "fp": hex(f.fp),
+                "module": f.module or None,
+            },
+            "thread": _safe(self._active_thread_info, default=None),
+            "registers": _safe(lambda: self._frame_registers(index), default=None),
+            "stack": _safe(lambda: self._stack_telescope(sp=f.sp), default=None),
+            "disassembly": _safe(lambda: self._disasm_at_pc(pc=f.pc), default=None),
+            "backtrace": _safe(self._backtrace_dicts, default=None),
+            "note": None
+            if index == 0
+            else "Caller frame: pc/sp/fp are unwound; clobbered registers are unavailable.",
+        }
+
+    def _frame_registers(self, index: int) -> list[dict[str, Any]] | None:
+        """Registers for a frame: full live set for #0, the recoverable unwound
+        subset (via the adapter) for caller frames."""
+        if index == 0:
+            return self._format_registers(full=False)
+        _safe(
+            lambda: self.controller.execute_backend_command(f"frame select {index}"), default=None
+        )
+        out = _safe(lambda: self.controller.execute_backend_command("register read"), default=None)
+        if not isinstance(out, str):
+            return None
+        regs = []
+        for line in _ANSI_RE.sub("", out).splitlines():
+            # "     rbx = 0x0000...". Clobbered regs read "= error: unavailable"
+            # and simply do not match, so they are honestly omitted.
+            m = re.match(r"\s*([a-z][a-z0-9]*)\s*=\s*(0x[0-9a-fA-F]+)\b", line)
+            if m:
+                regs.append({"name": m.group(1), "value": m.group(2), "hint": None})
+        return regs or None
 
     def read_memory(self, address: int, size: int) -> bytes:
         with self._lock:
@@ -1159,9 +1255,18 @@ class DebuggerSession:
     # ---------- context view ----------
 
     def context(self) -> dict[str, Any]:
-        """The full halted-state context, on demand (requires a stopped target)."""
+        """The full halted-state context, on demand (requires a stopped target).
+
+        Reflects the currently selected stack frame (see select_frame); defaults
+        to the innermost frame.
+        """
         with self._lock:
             self._require_halted()
+            if self._selected_frame != 0:
+                frames = self._frames()
+                if self._selected_frame < len(frames):
+                    return self._frame_context(self._selected_frame, frames)
+                self._selected_frame = 0  # frame list changed; fall back to #0
             ip = _safe(lambda: self.controller.ip, default=None)
             addr = hex(ip) if isinstance(ip, int) else None
             result = {"status": "ok", "address": addr, "function": self._function_name(addr)}
@@ -1190,10 +1295,13 @@ class DebuggerSession:
                 return regs[name].value
         return None
 
-    def _stack_telescope(self, count: int = 8) -> list[dict[str, Any]] | None:
-        """Dump ``count`` pointer-sized words from the stack pointer, annotating
-        any slot that points at a readable string."""
-        sp = self._stack_pointer()
+    def _stack_telescope(
+        self, count: int = 8, sp: int | None = None
+    ) -> list[dict[str, Any]] | None:
+        """Dump ``count`` pointer-sized words from ``sp`` (default: the live stack
+        pointer), annotating any slot that points at a readable string."""
+        if sp is None:
+            sp = self._stack_pointer()
         if not isinstance(sp, int):
             return None
         out = []
@@ -1231,13 +1339,13 @@ class DebuggerSession:
         text = "".join(chars)
         return text if len(text) >= 4 else None
 
-    def _disasm_at_pc(self, count: int = 8) -> str | None:
-        """Disassemble ``count`` instructions at the runtime PC via the adapter.
+    def _disasm_at_pc(self, count: int = 8, pc: int | None = None) -> str | None:
+        """Disassemble ``count`` instructions at ``pc`` (default: the runtime PC).
 
         Uses the adapter's own disassembler (live memory), so it is correct
         regardless of ASLR/PIE. Returns the adapter's raw text.
         """
-        ip = _safe(lambda: self.controller.ip, default=None)
+        ip = pc if pc is not None else _safe(lambda: self.controller.ip, default=None)
         if not isinstance(ip, int):
             return None
         adapter = (_safe(lambda: self.controller.adapter_type, default="") or "").upper()
@@ -1297,6 +1405,7 @@ class DebuggerSession:
                 "sp": hex(f.sp),
                 "function": f.func_name or None,
                 "module": f.module or None,
+                "selected": f.index == self._selected_frame,
             }
             for f in self.controller.frames_of_thread(thread.tid)
         ]

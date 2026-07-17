@@ -234,6 +234,13 @@ backtrace — so one call shows the whole picture. Pass `context=false` on
 `debug_context` on demand. Unexpected stops (crash/signal) always keep registers
 and backtrace even with context off.
 
+You can **switch the inspection context** to another thread (`debug_select_thread`)
+or up/down the call stack (`debug_select_frame` / `debug_frame_up` /
+`debug_frame_down`); the selection persists so subsequent registers/backtrace/
+context reflect it, until you change it or the target runs again. (Caller frames
+report unwound pc/sp/fp plus the recoverable registers — the callee clobbers the
+rest, which are honestly omitted.)
+
 | Function                                             | Description                                                                                                                                                             |
 | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `debug_set_breakpoint(location, condition)`          | Set a breakpoint by symbol/function **name** (e.g. `"checkResponse"`) or address. Optional `condition` (e.g. `"rdi == 0x10"`) only stops when true; registers, integer/hex literals, comparisons and arithmetic are supported. |
@@ -260,6 +267,8 @@ and backtrace even with context off.
 | `debug_get_backtrace(tid)`                           | Get the call stack of a halted thread (`tid` 0 = active thread).                                                                                                        |
 | `debug_list_threads()`                               | List the target's threads (tid, rip, function, which is active).                                                                                                        |
 | `debug_select_thread(tid)`                           | Make a thread active; subsequent inspection (registers/backtrace/context) targets it.                                                                                   |
+| `debug_select_frame(frame)`                          | Select a stack frame (0 = innermost); subsequent context/registers/backtrace reflect it (persists). Caller frames report unwound pc/sp/fp + recoverable registers only. |
+| `debug_frame_up()` / `debug_frame_down()`            | Move one frame toward the caller / callee (gdb `up`/`down`), returning that frame's context.                                                                            |
 | `debug_read_memory(address, size)`                   | Read memory from the halted target as a hexdump. Errors clearly if the region is non-readable or unmapped.                                                              |
 | `debug_set_register(name, value)`                    | Set a register in the halted target; verified by readback (returns old/new).                                                                                            |
 | `debug_write_memory(address, data)`                  | Write hex bytes to the halted target's **live process** memory (distinct from `patch_bytes`, which edits the static view). Non-writable/unmapped regions error; verified by readback. |
@@ -334,6 +343,8 @@ Interactive debugging endpoints:
 - `/debug/backtrace?tid=<tid>`: call stack of the halted target's active thread, or thread `tid` when given.
 - `/debug/threads`: list the target's threads (tid, rip, function, active).
 - `/debug/thread/select?tid=<tid>` (GET/POST): make a thread active.
+- `/debug/frame/select?frame=<index>` (GET/POST): select a stack frame (persists; inspection reflects it).
+- `/debug/frame/up` and `/debug/frame/down` (GET/POST): move one frame toward the caller / callee.
 - `/debug/memory?address=<addr>&size=<n>`: hexdump of memory from the halted target.
 - `/debug/quit` (GET/POST): terminate the running target.
 

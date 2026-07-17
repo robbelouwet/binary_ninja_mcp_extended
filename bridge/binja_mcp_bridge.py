@@ -1390,6 +1390,42 @@ def debug_select_thread(tid: int) -> str:
 
 
 @mcp.tool()
+def debug_select_frame(frame: int) -> str:
+    """
+    Select a stack frame by index (0 = innermost) as the inspection context.
+
+    Returns that frame's context (pc, function, registers, stack, disassembly,
+    backtrace). The selection PERSISTS: subsequent debug_context /
+    debug_get_registers / debug_get_backtrace reflect the selected frame until
+    you change it or the target runs again. For a caller frame, pc/sp/fp are
+    reliably unwound but a full register set is not available (the callee
+    clobbered most registers), so only the recoverable ones are shown. Requires
+    the target to be stopped.
+    """
+    return _json_dump(get_json("debug/frame/select", {"frame": frame}))
+
+
+@mcp.tool()
+def debug_frame_up() -> str:
+    """
+    Move one stack frame toward the caller (older frame) and show its context.
+
+    Like gdb's "up". Requires the target to be stopped.
+    """
+    return _json_dump(get_json("debug/frame/up"))
+
+
+@mcp.tool()
+def debug_frame_down() -> str:
+    """
+    Move one stack frame toward the callee (newer frame) and show its context.
+
+    Like gdb's "down". Requires the target to be stopped.
+    """
+    return _json_dump(get_json("debug/frame/down"))
+
+
+@mcp.tool()
 def debug_context() -> str:
     """
     Get the full pwndbg-style context of the halted target in one call.
