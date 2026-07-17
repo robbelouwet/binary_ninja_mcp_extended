@@ -332,9 +332,42 @@ def registers_route(req: Request):
 
 @route("/debug/backtrace")
 def backtrace_route(req: Request):
+    """Backtrace of the active thread, or of ``tid`` when given."""
+    session = _session(req)
+    tid_raw = req.param("tid")
+    tid = None
+    if tid_raw is not None and tid_raw != "":
+        try:
+            tid = int(tid_raw)
+        except (ValueError, TypeError):
+            raise HTTPError(400, f"Invalid tid: {tid_raw!r}")
+    try:
+        return {"backtrace": session.get_backtrace(tid)}
+    except DebuggerError as e:
+        raise HTTPError(400, str(e))
+
+
+@route("/debug/threads")
+def threads_route(req: Request):
+    """List the target's threads (tid, rip, function, active)."""
     session = _session(req)
     try:
-        return {"backtrace": session.get_backtrace()}
+        return {"threads": session.list_threads()}
+    except DebuggerError as e:
+        raise HTTPError(400, str(e))
+
+
+@route("/debug/thread/select", methods=("GET", "POST"))
+def select_thread_route(req: Request):
+    """Make a thread active by tid; subsequent inspection targets it."""
+    session = _session(req)
+    tid_raw = req.require("tid", help="Required: tid (thread id)")
+    try:
+        tid = int(tid_raw)
+    except (ValueError, TypeError):
+        raise HTTPError(400, f"Invalid tid: {tid_raw!r}")
+    try:
+        return session.select_thread(tid)
     except DebuggerError as e:
         raise HTTPError(400, str(e))
 

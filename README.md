@@ -257,7 +257,9 @@ and backtrace even with context off.
 | `debug_list_modules()`                               | List the images loaded in the target (executable + shared libraries) with runtime load base and size.                                                                       |
 | `debug_resolve_address(address)`                     | Resolve a runtime address to its memory mapping + backing image: `mmap_base`, `image_base`, `image_name`, `image_offset` (with `image_base + image_offset == address`). Descriptive only, no static translation. |
 | `debug_get_registers(full)`                          | Read registers of the halted target, with pointer hints. Important registers by default; `full=true` for the complete file (sub-registers, segment, FPU/vector).       |
-| `debug_get_backtrace()`                              | Get the call stack of the halted target's active thread.                                                                                                                |
+| `debug_get_backtrace(tid)`                           | Get the call stack of a halted thread (`tid` 0 = active thread).                                                                                                        |
+| `debug_list_threads()`                               | List the target's threads (tid, rip, function, which is active).                                                                                                        |
+| `debug_select_thread(tid)`                           | Make a thread active; subsequent inspection (registers/backtrace/context) targets it.                                                                                   |
 | `debug_read_memory(address, size)`                   | Read memory from the halted target as a hexdump. Errors clearly if the region is non-readable or unmapped.                                                              |
 | `debug_set_register(name, value)`                    | Set a register in the halted target; verified by readback (returns old/new).                                                                                            |
 | `debug_write_memory(address, data)`                  | Write hex bytes to the halted target's **live process** memory (distinct from `patch_bytes`, which edits the static view). Non-writable/unmapped regions error; verified by readback. |
@@ -329,7 +331,9 @@ Interactive debugging endpoints:
 - `/debug/modules`: list images loaded in the target (executable + shared libraries) with runtime base and size.
 - `/debug/resolve?address=<addr>`: resolve a runtime address to its mapping and backing image (`mmap_base`, `image_base`, `image_name`, `image_offset`).
 - `/debug/registers?full=<bool>`: registers of the halted target (with pointer hints); `full=1` returns the complete register file.
-- `/debug/backtrace`: call stack of the halted target's active thread.
+- `/debug/backtrace?tid=<tid>`: call stack of the halted target's active thread, or thread `tid` when given.
+- `/debug/threads`: list the target's threads (tid, rip, function, active).
+- `/debug/thread/select?tid=<tid>` (GET/POST): make a thread active.
 - `/debug/memory?address=<addr>&size=<n>`: hexdump of memory from the halted target.
 - `/debug/quit` (GET/POST): terminate the running target.
 

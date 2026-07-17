@@ -1356,13 +1356,37 @@ def debug_get_registers(full: bool = False) -> str:
 
 
 @mcp.tool()
-def debug_get_backtrace() -> str:
+def debug_get_backtrace(tid: int = 0) -> str:
     """
-    Get the call stack (backtrace) of the halted target's active thread.
+    Get the call stack (backtrace) of a halted thread.
+
+    - tid: thread id to backtrace; 0 (default) uses the active thread.
 
     Requires the target to be stopped.
     """
-    return _json_dump(get_json("debug/backtrace"))
+    params = {"tid": tid} if tid else {}
+    return _json_dump(get_json("debug/backtrace", params))
+
+
+@mcp.tool()
+def debug_list_threads() -> str:
+    """
+    List the target's threads (tid, current rip, function, and which is active).
+
+    Requires the target to be stopped.
+    """
+    return _json_dump(get_json("debug/threads"))
+
+
+@mcp.tool()
+def debug_select_thread(tid: int) -> str:
+    """
+    Make a thread active by its tid.
+
+    Subsequent inspection (registers, backtrace, context) targets the selected
+    thread. Requires the target to be stopped.
+    """
+    return _json_dump(get_json("debug/thread/select", {"tid": tid}))
 
 
 @mcp.tool()

@@ -1337,9 +1337,27 @@ export function registerTools(server: McpServer, client: BinjaHttpClient): void 
 
   server.tool(
     "debug_get_backtrace",
-    "Get the call stack (backtrace) of the halted target's active thread. Requires the target to be stopped.",
+    "Get the call stack (backtrace) of a halted thread. Pass tid to backtrace a specific thread; 0 (default) uses the active thread. Requires the target to be stopped.",
+    {
+      tid: z.number().default(0).describe("Thread id to backtrace; 0 = active thread"),
+    },
+    async ({ tid = 0 }) => jsonText(await client.getJson("debug/backtrace", tid ? { tid } : {}))
+  );
+
+  server.tool(
+    "debug_list_threads",
+    "List the target's threads (tid, current rip, function, and which is active). Requires the target to be stopped.",
     {},
-    async () => jsonText(await client.getJson("debug/backtrace"))
+    async () => jsonText(await client.getJson("debug/threads"))
+  );
+
+  server.tool(
+    "debug_select_thread",
+    "Make a thread active by its tid. Subsequent inspection (registers, backtrace, context) targets the selected thread. Requires the target to be stopped.",
+    {
+      tid: z.number().describe("Thread id to make active"),
+    },
+    async ({ tid }) => jsonText(await client.getJson("debug/thread/select", { tid }))
   );
 
   server.tool(

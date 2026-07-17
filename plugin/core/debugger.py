@@ -995,11 +995,13 @@ class DebuggerSession:
         by_name = {r["name"]: r for r in all_regs}
         return [by_name[name] for name in important if name in by_name]
 
-    def get_backtrace(self) -> list[dict[str, Any]]:
+    def get_backtrace(self, tid: int | None = None) -> list[dict[str, Any]]:
+        """Backtrace of the given thread, or the active thread when ``tid`` is None."""
         with self._lock:
             self._require_halted()
-            thread = self.controller.active_thread
-            frames = self.controller.frames_of_thread(thread.tid)
+            if tid is None:
+                tid = self.controller.active_thread.tid
+            frames = self.controller.frames_of_thread(tid)
             out = []
             for f in frames:
                 out.append(
@@ -1014,6 +1016,49 @@ class DebuggerSession:
                     }
                 )
             return out
+
+    def list_threads(self) -> list[dict[str, Any]]:
+        """List the target's threads, flagging the active one."""
+        with self._lock:
+            self._require_halted()
+            active_tid = _safe(lambda: self.controller.active_thread.tid, default=None)
+            out = []
+            for t in self.controller.threads:
+                rip = getattr(t, "rip", None)
+                rip_hex = hex(rip) if isinstance(rip, int) else None
+                out.append(
+                    {
+                        "tid": t.tid,
+                        "rip": rip_hex,
+                        "function": self._function_name(rip_hex),
+                        "active": t.tid == active_tid,
+                    }
+                )
+            return out
+
+    def select_thread(self, tid: int) -> dict[str, Any]:
+        """Make ``tid`` the active thread (subsequent inspection targets it)."""
+        with self._lock:
+            self._require_halted()
+            target = None
+            for t in self.controller.threads:
+                if t.tid == tid:
+                    target = t
+                    break
+            if target is None:
+                raise DebuggerError(f"No thread with tid {tid}")
+            try:
+                self.controller.active_thread = target
+            except Exception as e:
+                raise DebuggerError(f"Failed to select thread {tid}: {e}")
+            rip = getattr(target, "rip", None)
+            rip_hex = hex(rip) if isinstance(rip, int) else None
+            return {
+                "status": "ok",
+                "tid": tid,
+                "rip": rip_hex,
+                "function": self._function_name(rip_hex),
+            }
 
     def read_memory(self, address: int, size: int) -> bytes:
         with self._lock:
