@@ -180,6 +180,7 @@ automatically.
 - `debug_step_out` - Run until the current function returns ("finish"; blocking)
 - `debug_run_to` - Resume until a given address ("advance"/"until"; blocking)
 - `debug_pause` - Break into a running (hung/looping) target
+- `debug_status` - Session status: active adapter (dialect), live/running, current ip/function, breakpoint count
 - `debug_backend_command` - Escape hatch: run a raw LLDB/WinDbg adapter command (e.g. watchpoints, memory maps)
 - `debug_get_registers` - Read registers of the halted target
 - `debug_get_backtrace` - Get the call stack of the halted target

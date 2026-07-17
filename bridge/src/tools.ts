@@ -1172,8 +1172,15 @@ export function registerTools(server: McpServer, client: BinjaHttpClient): void 
   );
 
   server.tool(
+    "debug_status",
+    "Get debugger session status: the active backend adapter (LLDB/WinDbg — the command dialect for debug_backend_command), whether a target is live and running or halted, the current ip/function when halted, and how many breakpoints are set. Call this to learn the adapter dialect before using debug_backend_command. Works even before a target is launched.",
+    {},
+    async () => jsonText(await client.getJson("debug/status"))
+  );
+
+  server.tool(
     "debug_backend_command",
-    "Run a raw command in the underlying debug adapter's console (LLDB/WinDbg) — an escape hatch for capabilities not yet wrapped as structured tools (e.g. hardware breakpoints/watchpoints via LLDB 'watchpoint set'/WinDbg 'ba', memory maps via 'memory region'). Returns the adapter's output plus which adapter is active. Requires a live target. Prefer structured debug_* tools for execution control.",
+    "Run a raw command in the underlying debug adapter's console (LLDB/WinDbg) — an escape hatch for capabilities not yet wrapped as structured tools (e.g. hardware breakpoints/watchpoints via LLDB 'watchpoint set'/WinDbg 'ba', memory maps via 'memory region'). Returns the adapter's output plus which adapter is active. Call debug_status first if you don't know the active adapter (dialect). Requires a live target. Prefer structured debug_* tools for execution control.",
     {
       command: z.string().describe("Raw adapter command, e.g. LLDB 'memory region 0x401000' or WinDbg 'ba w4 0x401000'"),
     },

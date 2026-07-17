@@ -119,11 +119,18 @@ def pause_route(req: Request):
     return session.pause()
 
 
+@route("/debug/status")
+def status_route(req: Request):
+    """Session status: backend adapter (dialect), live/running, ip/function, bp count."""
+    return _session(req).status()
+
+
 @route("/debug/backend", methods=("GET", "POST"))
 def backend_route(req: Request):
     """Run a raw command in the underlying debug adapter's (LLDB/WinDbg) console.
 
-    Escape hatch for capabilities not yet wrapped as structured tools. POST is
+    Escape hatch for capabilities not yet wrapped as structured tools. Check
+    /debug/status first to learn which adapter (dialect) is active. POST is
     preferred for commands with spaces/special characters.
     """
     session = _session(req)

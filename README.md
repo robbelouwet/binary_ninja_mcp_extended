@@ -239,6 +239,7 @@ tells you exactly what happened.
 | `debug_step_out(timeout_seconds)`                    | Run until the current function returns to its caller ("finish"; blocking).                                                                                              |
 | `debug_run_to(address, timeout_seconds)`             | Resume until the target reaches an address ("advance"/"until"; blocking).                                                                                               |
 | `debug_pause()`                                      | Break into a running target (e.g. hung or looping) so it can be inspected; the in-flight run/continue returns with the stop location.                                  |
+| `debug_status()`                                     | Debugger session status: active adapter (dialect for `debug_backend_command`), live/running, current ip/function when halted, breakpoint count. Works before launch.        |
 | `debug_backend_command(command)`                     | Escape hatch: run a raw command in the underlying adapter console (LLDB/WinDbg). For capabilities not yet wrapped (e.g. watchpoints, memory maps). Returns adapter + output. |
 | `debug_get_registers(full)`                          | Read registers of the halted target, with pointer hints. Important registers by default; `full=true` for the complete file (sub-registers, segment, FPU/vector).       |
 | `debug_get_backtrace()`                              | Get the call stack of the halted target's active thread.                                                                                                                |
@@ -300,6 +301,7 @@ Interactive debugging endpoints:
 - `/debug/stepout?timeout=<seconds>` (GET/POST): run until the current function returns (blocking).
 - `/debug/runto?address=<addr>&timeout=<seconds>` (GET/POST): resume until an address is reached (blocking).
 - `/debug/pause` (GET/POST): break into a running target so it can be inspected.
+- `/debug/status`: session status — active adapter (dialect), live/running, current ip/function when halted, breakpoint count. Works before launch.
 - `/debug/backend?command=<cmd>` (GET/POST): run a raw command in the underlying adapter console (LLDB/WinDbg); returns the active adapter and its output. POST preferred for commands with spaces.
 - `/debug/registers?full=<bool>`: registers of the halted target (with pointer hints); `full=1` returns the complete register file.
 - `/debug/backtrace`: call stack of the halted target's active thread.

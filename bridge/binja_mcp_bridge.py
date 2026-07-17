@@ -1149,15 +1149,30 @@ def debug_pause() -> str:
 
 
 @mcp.tool()
+def debug_status() -> str:
+    """
+    Get debugger session status.
+
+    Reports the active backend adapter (LLDB or WinDbg — the command dialect for
+    debug_backend_command), whether a target is live and running or halted, the
+    current instruction pointer and function when halted, and how many
+    breakpoints are set. Call this to learn the adapter dialect before using
+    debug_backend_command. Works even before a target is launched.
+    """
+    return _json_dump(get_json("debug/status"))
+
+
+@mcp.tool()
 def debug_backend_command(command: str) -> str:
     """
     Run a raw command in the underlying debug adapter's console (escape hatch).
 
     For the LLDB adapter this is any LLDB command; for DbgEng, any WinDbg command.
-    Returns the adapter's printed output plus which adapter is active (so you know
-    the command dialect). Useful for capabilities not yet wrapped as structured
-    tools, e.g. hardware breakpoints/watchpoints (LLDB `watchpoint set ...`,
-    WinDbg `ba`) or memory maps (LLDB `memory region`). Requires a live target.
+    Returns the adapter's printed output plus which adapter is active. Call
+    debug_status first if you don't know which adapter (dialect) is active.
+    Useful for capabilities not yet wrapped as structured tools, e.g. hardware
+    breakpoints/watchpoints (LLDB `watchpoint set ...`, WinDbg `ba`) or memory
+    maps (LLDB `memory region`). Requires a live target.
 
     Prefer the structured debug_* tools for execution control: commands that
     change execution state here bypass this server's stop tracking.

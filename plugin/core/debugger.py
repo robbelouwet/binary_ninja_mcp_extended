@@ -270,6 +270,33 @@ class DebuggerSession:
             "message": "Pause requested; the in-flight run/continue will return with the stop location.",
         }
 
+    def status(self) -> dict[str, Any]:
+        """Session/adapter status, queryable at any time (no live target needed).
+
+        Reports the backend ``adapter`` — the command dialect to use with
+        :meth:`execute_backend_command` — and, when a target is live, whether it
+        is running and where it is halted. Lets a client learn the dialect before
+        issuing its first backend command.
+        """
+        live = self.is_live
+        running = bool(_safe(lambda: self.controller.running, default=False)) if live else False
+        ip_hex = None
+        func = None
+        if live and not running:
+            ip = _safe(lambda: self.controller.ip, default=None)
+            ip_hex = hex(ip) if isinstance(ip, int) else None
+            func = self._function_name(ip_hex)
+        with self._lock:
+            bp_count = len(self._breakpoints)
+        return {
+            "adapter": _safe(lambda: self.controller.adapter_type, default=None),
+            "live": live,
+            "running": running,
+            "ip": ip_hex,
+            "function": func,
+            "breakpoints": bp_count,
+        }
+
     def execute_backend_command(self, command: str) -> dict[str, Any]:
         """Run a raw command in the underlying debug adapter's console.
 
