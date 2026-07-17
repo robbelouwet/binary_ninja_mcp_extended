@@ -253,7 +253,9 @@ and backtrace even with context off.
 | `debug_resolve_address(address)`                     | Resolve a runtime address to its memory mapping + backing image: `mmap_base`, `image_base`, `image_name`, `image_offset` (with `image_base + image_offset == address`). Descriptive only, no static translation. |
 | `debug_get_registers(full)`                          | Read registers of the halted target, with pointer hints. Important registers by default; `full=true` for the complete file (sub-registers, segment, FPU/vector).       |
 | `debug_get_backtrace()`                              | Get the call stack of the halted target's active thread.                                                                                                                |
-| `debug_read_memory(address, size)`                   | Read memory from the halted target as a hexdump.                                                                                                                         |
+| `debug_read_memory(address, size)`                   | Read memory from the halted target as a hexdump. Errors clearly if the region is non-readable or unmapped.                                                              |
+| `debug_set_register(name, value)`                    | Set a register in the halted target; verified by readback (returns old/new).                                                                                            |
+| `debug_write_memory(address, data)`                  | Write hex bytes to the halted target's **live process** memory (distinct from `patch_bytes`, which edits the static view). Non-writable/unmapped regions error; verified by readback. |
 | `debug_quit()`                                       | Terminate the running target.                                                                                                                                            |
 
 **Stop results.** `debug_run`/`debug_continue` return a `status` of `breakpoint`,
@@ -312,6 +314,8 @@ Interactive debugging endpoints:
 - `/debug/runto?address=<addr>&timeout=<seconds>` (GET/POST): resume until an address is reached (blocking).
 - `/debug/pause` (GET/POST): break into a running target so it can be inspected.
 - `/debug/context`: full halted-state context (thread, registers, stack telescope, disasm-at-PC, backtrace). Auto-attached to run/continue/step stops unless `context=0`.
+- `/debug/setRegister?name=<reg>&value=<val>` (GET/POST): set a register; verified by readback.
+- `/debug/writeMemory?address=<addr>&data=<hex>` (GET/POST): write hex bytes to the live process; non-writable/unmapped regions error; verified by readback.
 - `/debug/status`: session status — active adapter (dialect), live/running, current ip/function when halted, breakpoint count. Works before launch.
 - `/debug/backend?command=<cmd>` (GET/POST): run a raw command in the underlying adapter console (LLDB/WinDbg); returns the active adapter and its output. POST preferred for commands with spaces.
 - `/debug/modules`: list images loaded in the target (executable + shared libraries) with runtime base and size.

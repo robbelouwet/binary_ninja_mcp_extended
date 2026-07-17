@@ -777,7 +777,88 @@ class DebuggerSession:
         with self._lock:
             self._require_halted()
             buf = self.controller.read_memory(address, size)
-            return bytes(buf) if buf is not None else b""
+            data = bytes(buf) if buf is not None else b""
+            if len(data) < size:
+                # Short/empty read: classify why so the client can react.
+                perms = self._region_perms(address)
+                if _is_unmapped(perms):
+                    raise DebuggerError(f"Memory at {hex(address)} is unmapped.")
+                if perms is not None and "r" not in perms:
+                    raise DebuggerError(
+                        f"Memory at {hex(address)} is not readable (permissions {perms!r})."
+                    )
+                if not data:
+                    raise DebuggerError(
+                        f"Could not read memory at {hex(address)} (unmapped or inaccessible)."
+                    )
+            return data
+
+    def set_register(self, name: str, value: int) -> dict[str, Any]:
+        """Set a register's value, verifying the write by reading it back."""
+        with self._lock:
+            self._require_halted()
+            regs = self.controller.regs.regs
+            if name not in regs:
+                raise DebuggerError(f"Unknown register: {name!r}")
+            old = regs[name].value
+            ok = _safe(lambda: self.controller.set_reg_value(name, value), default=False)
+            new = _safe(lambda: self.controller.regs.regs[name].value, default=None)
+            if not ok and new != value:
+                raise DebuggerError(f"Failed to set register {name!r}.")
+            if new != value:
+                # The adapter accepted the write but the value did not stick.
+                raise DebuggerError(
+                    f"Register {name!r} did not take the value "
+                    f"({hex(value)} requested, reads {hex(new) if isinstance(new, int) else new})."
+                )
+            return {
+                "status": "ok",
+                "register": name,
+                "old_value": hex(old),
+                "new_value": hex(new),
+            }
+
+    def write_memory(self, address: int, data: bytes) -> dict[str, Any]:
+        """Write bytes to the target's memory, guarding non-writable regions.
+
+        Checks the region permissions first for a clear error, then verifies the
+        write by reading the bytes back (so a silently-failed write is caught).
+        """
+        with self._lock:
+            self._require_halted()
+            if not data:
+                raise DebuggerError("No data to write.")
+            perms = self._region_perms(address)
+            if _is_unmapped(perms):
+                raise DebuggerError(f"Memory at {hex(address)} is unmapped.")
+            if perms is not None and "w" not in perms:
+                raise DebuggerError(
+                    f"Memory at {hex(address)} is not writable (permissions {perms!r})."
+                )
+            ok = _safe(lambda: self.controller.write_memory(address, data), default=False)
+            if not ok:
+                raise DebuggerError(
+                    f"Failed to write {len(data)} byte(s) at {hex(address)}"
+                    + (f" (permissions {perms!r})." if perms else " (unmapped or inaccessible).")
+                )
+            # Verify by reading back.
+            readback = _safe(lambda: self.controller.read_memory(address, len(data)), default=None)
+            verified = readback is not None and bytes(readback)[: len(data)] == data
+            return {
+                "status": "ok",
+                "address": hex(address),
+                "bytes_written": len(data),
+                "verified": bool(verified),
+                "data": data.hex(),
+            }
+
+    def _region_perms(self, address: int) -> str | None:
+        """Return the permission string (e.g. "rw-") for the region containing
+        ``address``, or None when the adapter/output is not understood."""
+        region = self._query_memory_region(address)
+        if region is None or not region.get("mapped"):
+            return None
+        return region.get("perms")
 
     def state_snapshot(self) -> dict[str, Any]:
         """Registers + backtrace + ip, best-effort (used by the crash path)."""
@@ -989,6 +1070,12 @@ def _busy_result() -> dict[str, Any]:
 
 def _basename(path: str) -> str:
     return os.path.basename(path) if path else ""
+
+
+def _is_unmapped(perms: str | None) -> bool:
+    """True when a region has no access at all (LLDB reports gaps as '---'),
+    i.e. the address is effectively unmapped."""
+    return bool(perms) and set(perms) <= {"-"}
 
 
 def _reason_name(reason) -> str:

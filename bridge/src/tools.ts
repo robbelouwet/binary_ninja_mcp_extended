@@ -1284,12 +1284,36 @@ export function registerTools(server: McpServer, client: BinjaHttpClient): void 
 
   server.tool(
     "debug_read_memory",
-    "Read memory from the halted target and return it as a hexdump. Requires the target to be stopped.",
+    "Read memory from the halted target and return it as a hexdump. Errors clearly if the memory is not readable or unmapped. Requires the target to be stopped.",
     {
       address: z.string().describe("Address, hex like 0x401000 or decimal"),
       size: z.number().default(64).describe("Number of bytes to read"),
     },
     async ({ address, size = 64 }) => jsonText(await client.getJson("debug/memory", { address, size }))
+  );
+
+  server.tool(
+    "debug_set_register",
+    "Set a register's value in the halted target. The write is verified by reading it back; returns old and new values. Requires the target to be stopped.",
+    {
+      name: z.string().describe("Register name, e.g. rax, rip"),
+      value: z.string().describe("Value, hex like 0x10 or decimal"),
+    },
+    async ({ name, value }) => ({
+      content: [{ type: "text", text: await client.post("debug/setRegister", { name, value }) }],
+    })
+  );
+
+  server.tool(
+    "debug_write_memory",
+    "Write bytes to the halted target's LIVE process memory (distinct from patch_bytes, which edits the static BinaryView). The region's permissions are checked first, so writing to non-writable or unmapped memory returns a clear error; the write is verified by reading it back. Requires the target to be stopped.",
+    {
+      address: z.string().describe("Address, hex like 0x401000 or decimal"),
+      data: z.string().describe("Hex bytes, e.g. '90 90' or '9090'"),
+    },
+    async ({ address, data }) => ({
+      content: [{ type: "text", text: await client.post("debug/writeMemory", { address, data }) }],
+    })
   );
 
   server.tool(

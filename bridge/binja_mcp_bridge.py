@@ -1327,9 +1327,40 @@ def debug_read_memory(address: str, size: int = 64) -> str:
     - address: hex like "0x401000" or decimal.
     - size: number of bytes to read (default 64).
 
-    Requires the target to be stopped.
+    Errors clearly if the memory is not readable (non-readable region) or
+    unmapped. Requires the target to be stopped.
     """
     return _json_dump(get_json("debug/memory", {"address": address, "size": size}))
+
+
+@mcp.tool()
+def debug_set_register(name: str, value: str) -> str:
+    """
+    Set a register's value in the halted target.
+
+    - name: register name, e.g. "rax", "rip".
+    - value: hex like "0x10" or decimal.
+
+    The write is verified by reading the register back; returns the old and new
+    values. Requires the target to be stopped.
+    """
+    return _json_dump(safe_post_json("debug/setRegister", {"name": name, "value": value}))
+
+
+@mcp.tool()
+def debug_write_memory(address: str, data: str) -> str:
+    """
+    Write bytes to the halted target's live process memory.
+
+    - address: hex like "0x401000" or decimal.
+    - data: hex bytes, e.g. "90 90" or "9090".
+
+    This modifies the running process (distinct from patch_bytes, which edits the
+    static BinaryView). The target region's permissions are checked first, so
+    writing to non-writable or unmapped memory returns a clear error; the write
+    is then verified by reading the bytes back. Requires the target to be stopped.
+    """
+    return _json_dump(safe_post_json("debug/writeMemory", {"address": address, "data": data}))
 
 
 @mcp.tool()

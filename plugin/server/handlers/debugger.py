@@ -259,6 +259,60 @@ def memory_route(req: Request):
     }
 
 
+@route("/debug/setRegister", methods=("GET", "POST"))
+def set_register_route(req: Request):
+    """Set a register in the halted target. Params: name, value."""
+    session = _session(req)
+    name = req.require("name", "register", help="Required: name (register name)")
+    value_raw = req.require("value", help="Required: value (hex like 0x10 or decimal)")
+    try:
+        value = parse_address(value_raw, bare_hex=False)
+    except ValueError:
+        raise HTTPError(400, f"Invalid value: {value_raw!r}")
+    try:
+        return session.set_register(name, value)
+    except DebuggerError as e:
+        raise HTTPError(400, str(e))
+
+
+@route("/debug/writeMemory", methods=("GET", "POST"))
+def write_memory_route(req: Request):
+    """Write bytes to the halted target. Params: address, data (hex string)."""
+    session = _session(req)
+    address = _address(req, "address", "addr", help="Required: address to write to")
+    data_str = req.require("data", "bytes", help="Required: data (hex, e.g. '90 90' or '9090')")
+    try:
+        data = _parse_hex_bytes(data_str)
+    except ValueError as e:
+        raise HTTPError(400, str(e))
+    try:
+        return session.write_memory(address, data)
+    except DebuggerError as e:
+        raise HTTPError(400, str(e))
+
+
+def _parse_hex_bytes(text: str) -> bytes:
+    """Parse a hex byte string like '90 90', '9090', or '0x90 0x90'."""
+    cleaned = text.replace("0x", "").replace("0X", "").replace(",", " ")
+    tokens = cleaned.split()
+    if not tokens:
+        raise ValueError("No data to write.")
+    # Multiple whitespace-separated tokens are individual bytes (each 1 byte).
+    if len(tokens) > 1:
+        try:
+            return bytes(int(tok, 16) for tok in tokens)
+        except ValueError:
+            raise ValueError(f"Invalid hex bytes: {text!r}")
+    # A single token: a compact hex string (an even number of hex digits).
+    compact = tokens[0]
+    if len(compact) % 2 != 0:
+        raise ValueError(f"Hex string must have an even number of digits: {text!r}")
+    try:
+        return bytes.fromhex(compact)
+    except ValueError:
+        raise ValueError(f"Invalid hex bytes: {text!r}")
+
+
 @route("/debug/quit", methods=("GET", "POST"))
 def quit_route(req: Request):
     """Terminate the live target."""

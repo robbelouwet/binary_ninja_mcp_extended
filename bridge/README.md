@@ -187,7 +187,9 @@ automatically.
 - `debug_resolve_address` - Resolve a runtime address to its mapping and backing image (mmap_base, image_base, image_name, image_offset)
 - `debug_get_registers` - Read registers of the halted target
 - `debug_get_backtrace` - Get the call stack of the halted target
-- `debug_read_memory` - Read memory from the halted target as a hexdump
+- `debug_read_memory` - Read memory from the halted target as a hexdump (errors on non-readable/unmapped)
+- `debug_set_register` - Set a register in the halted target (verified by readback)
+- `debug_write_memory` - Write bytes to the halted target's live process memory (non-writable/unmapped regions error)
 - `debug_quit` - Terminate the running target
 
 ### Utility Tools
