@@ -35,6 +35,16 @@ _MAX_IMAGE_SIZE = 1 << 34  # 16 GiB
 # LLDB colorizes disassembly with ANSI escape codes; strip them from captured text.
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
+# Parse the adapter's watchpoint number from an LLDB `watchpoint set` line:
+#   Watchpoint created: Watchpoint 1: addr = 0x... size = 8 ...
+_LLDB_WP_SET_RE = re.compile(r"Watchpoint\s+(\d+):")
+# Parse the stop reason from LLDB `thread info` (ANSI already stripped):
+#   thread #1: ... stop reason = watchpoint 1
+_LLDB_STOP_REASON_RE = re.compile(r"stop reason = (.+?)\s*$", re.MULTILINE)
+
+# LLDB `-w` access-type keyword per watchpoint type.
+_LLDB_WATCH_ACCESS = {"read": "read", "write": "write", "readwrite": "read_write"}
+
 # Binary Ninja setting controlling the debugger's automatic stop at the program
 # entry point. Toggling it (rather than "skipping the first breakpoint") is the
 # only reliable way to suppress ONLY the entry-point stop: with it off, the stop
@@ -133,6 +143,31 @@ class Breakpoint:
         }
 
 
+class Watchpoint:
+    """A hardware watchpoint tracked by the session.
+
+    ``adapter_num`` is the underlying adapter's own watchpoint number (used to
+    delete/enable/disable it and to attribute a stop to it).
+    """
+
+    def __init__(self, wp_id: int, address: int, size: int, wtype: str, adapter_num: int):
+        self.id = wp_id
+        self.address = address
+        self.size = size
+        self.wtype = wtype  # "read" | "write" | "readwrite"
+        self.adapter_num = adapter_num
+        self.enabled = True
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "address": hex(self.address),
+            "size": self.size,
+            "type": self.wtype,
+            "enabled": self.enabled,
+        }
+
+
 class DebuggerSession:
     """Owns a DebuggerController for one BinaryView plus the breakpoint registry."""
 
@@ -143,6 +178,8 @@ class DebuggerSession:
         self.controller = DebuggerController(bv)
         self._breakpoints: dict[int, Breakpoint] = {}
         self._next_bp_id = 1
+        self._watchpoints: dict[int, Watchpoint] = {}
+        self._next_wp_id = 1
         # Guards the breakpoint registry and the _running flag ONLY. It is held
         # for short critical sections and never across a blocking wait, so a
         # pause/quit/inspect request is never stuck behind a running target.
@@ -255,6 +292,91 @@ class DebuggerSession:
                     return bp
         return None
 
+    # ---------- watchpoints ----------
+
+    def add_watchpoint(self, address: int, size: int = 8, wtype: str = "write") -> Watchpoint:
+        """Set a hardware watchpoint that stops when ``address`` is accessed.
+
+        ``wtype`` is "read", "write", or "readwrite". Hardware watchpoints are a
+        limited resource; exceeding the adapter's count raises DebuggerError.
+        Implemented via the adapter's own command (LLDB); the client does not
+        need to know the adapter dialect.
+        """
+        if not self.is_live:
+            raise DebuggerError("No live target. Run the program first.")
+        wtype = wtype.lower()
+        if wtype not in ("read", "write", "readwrite"):
+            raise DebuggerError(f"Invalid watchpoint type {wtype!r} (use read/write/readwrite).")
+        if size not in (1, 2, 4, 8):
+            raise DebuggerError(f"Invalid watchpoint size {size} (use 1, 2, 4, or 8).")
+
+        adapter = (_safe(lambda: self.controller.adapter_type, default="") or "").upper()
+        if "DBGENG" not in adapter and "WINDBG" not in adapter:
+            access = _LLDB_WATCH_ACCESS[wtype]
+            cmd = f"watchpoint set expression -w {access} -s {size} -- {hex(address)}"
+        else:
+            raise DebuggerError("Watchpoints are only wired for the LLDB adapter so far.")
+
+        with self._lock:
+            output = _safe(lambda: self.controller.execute_backend_command(cmd), default="") or ""
+            clean = _ANSI_RE.sub("", output)
+            m = _LLDB_WP_SET_RE.search(clean)
+            if not m:
+                # Surface the adapter's own error (e.g. no more HW watchpoint resources).
+                raise DebuggerError(f"Failed to set watchpoint: {clean.strip() or 'unknown error'}")
+            adapter_num = int(m.group(1))
+            wp = Watchpoint(self._next_wp_id, address, size, wtype, adapter_num)
+            self._next_wp_id += 1
+            self._watchpoints[wp.id] = wp
+            return wp
+
+    def list_watchpoints(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return [wp.to_dict() for wp in sorted(self._watchpoints.values(), key=lambda w: w.id)]
+
+    def delete_watchpoint(self, wp_id: int) -> bool:
+        with self._lock:
+            wp = self._watchpoints.pop(wp_id, None)
+            if not wp:
+                return False
+            self._watchpoint_command(f"watchpoint delete {wp.adapter_num}")
+            return True
+
+    def set_watchpoint_enabled(self, wp_id: int, enabled: bool) -> Watchpoint:
+        with self._lock:
+            wp = self._watchpoints.get(wp_id)
+            if wp is None:
+                raise DebuggerError(f"No watchpoint with id {wp_id}")
+            verb = "enable" if enabled else "disable"
+            self._watchpoint_command(f"watchpoint {verb} {wp.adapter_num}")
+            wp.enabled = enabled
+            return wp
+
+    def _watchpoint_command(self, cmd: str) -> None:
+        try:
+            self.controller.execute_backend_command(cmd)
+        except Exception as e:
+            raise DebuggerError(f"Watchpoint command failed: {e}")
+
+    def _watchpoint_by_adapter_num(self, num: int) -> Watchpoint | None:
+        with self._lock:
+            for wp in self._watchpoints.values():
+                if wp.adapter_num == num:
+                    return wp
+        return None
+
+    def _adapter_stop_reason(self) -> str | None:
+        """The adapter's own stop reason (e.g. 'watchpoint 1'), via ``thread info``.
+
+        Binary Ninja reports a watchpoint hit as UnknownReason; the adapter knows
+        the true reason, so we ask it. Returns the reason text or None.
+        """
+        out = _safe(lambda: self.controller.execute_backend_command("thread info"), default=None)
+        if not isinstance(out, str):
+            return None
+        m = _LLDB_STOP_REASON_RE.search(_ANSI_RE.sub("", out))
+        return m.group(1).strip() if m else None
+
     # ---------- run / continue ----------
 
     def launch_and_run(
@@ -283,6 +405,10 @@ class DebuggerSession:
         if not self._begin_run():
             return _busy_result()
         self._include_context = context
+        # Watchpoints live on the process, not the analysis, so a fresh launch
+        # starts with none (breakpoints, by contrast, are re-applied by BN).
+        with self._lock:
+            self._watchpoints.clear()
         try:
             with self._lock:
                 self._apply_launch_opts(launch_opts)
@@ -759,6 +885,13 @@ class DebuggerSession:
             }
             return self._attach_context(result, expected=True)
 
+        # 3b. A watchpoint hit surfaces from Binary Ninja as UnknownReason. If we
+        # have watchpoints, ask the adapter for the true reason and attribute it.
+        if self._watchpoints:
+            wp_result = self._resolve_watchpoint_stop(addr_hex, func)
+            if wp_result is not None:
+                return wp_result
+
         # 4. EVERYTHING else is unexpected — a signal, an exception, a breakpoint
         # we did not set, or a reason we never anticipated (including
         # UnknownReason). These always carry at least registers + backtrace so
@@ -779,6 +912,41 @@ class DebuggerSession:
             "address": addr_hex,
             "function": func,
             "message": f"{headline} at {addr_hex}",
+        }
+        return self._attach_context(result, expected=False)
+
+    def _resolve_watchpoint_stop(
+        self, addr_hex: str | None, func: str | None
+    ) -> dict[str, Any] | None:
+        """If the current stop is a watchpoint hit, build its stop result.
+
+        Asks the adapter for the true stop reason (Binary Ninja reports the hit
+        as UnknownReason) and, when it is one of our watchpoints, reports it as a
+        first-class ``watchpoint`` stop instead of an anonymous one.
+        """
+        reason = self._adapter_stop_reason()
+        if not reason:
+            return None
+        m = re.match(r"watchpoint\s+(\d+)", reason, re.IGNORECASE)
+        if not m:
+            return None
+        wp = self._watchpoint_by_adapter_num(int(m.group(1)))
+        if wp is None:
+            return None
+        where = f" in {func}" if func else ""
+        result = {
+            "status": "watchpoint",
+            "stop_reason": "Watchpoint",
+            "watchpoint_id": wp.id,
+            "watch_address": hex(wp.address),
+            "watch_type": wp.wtype,
+            "watch_size": wp.size,
+            "address": addr_hex,
+            "function": func,
+            "message": (
+                f"Watchpoint #{wp.id} ({wp.wtype}, {wp.size} bytes at {hex(wp.address)}) "
+                f"hit at {addr_hex}{where}"
+            ),
         }
         return self._attach_context(result, expected=False)
 

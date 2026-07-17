@@ -1159,6 +1159,55 @@ export function registerTools(server: McpServer, client: BinjaHttpClient): void 
   );
 
   server.tool(
+    "debug_set_watchpoint",
+    "Set a hardware watchpoint that stops execution when memory is accessed. When the watched memory is accessed, run/continue stops with status 'watchpoint' naming this watchpoint. Hardware watchpoints are a limited resource (typically 4); exceeding the limit returns a clear error. Requires a live target.",
+    {
+      address: z.string().describe("Address to watch, hex like 0x4034d0 or decimal"),
+      size: z.number().default(8).describe("Bytes to watch: 1, 2, 4, or 8"),
+      type: z.enum(["write", "read", "readwrite"]).default("write").describe("Access type to trap"),
+    },
+    async ({ address, size = 8, type = "write" }) => ({
+      content: [{ type: "text", text: await client.post("debug/watchpoint", { address, size, type }) }],
+    })
+  );
+
+  server.tool(
+    "debug_list_watchpoints",
+    "List all hardware watchpoints (id, address, size, type, enabled).",
+    {},
+    async () => jsonText(await client.getJson("debug/watchpoint"))
+  );
+
+  server.tool(
+    "debug_delete_watchpoint",
+    "Delete a watchpoint by its id (see debug_list_watchpoints).",
+    {
+      id: z.number().describe("Watchpoint id to delete"),
+    },
+    async ({ id }) => ({
+      content: [{ type: "text", text: await client.post("debug/watchpoint", { id, _method: "DELETE" }) }],
+    })
+  );
+
+  server.tool(
+    "debug_enable_watchpoint",
+    "Enable a previously disabled watchpoint by its id.",
+    {
+      id: z.number().describe("Watchpoint id to enable"),
+    },
+    async ({ id }) => jsonText(await client.getJson("debug/watchpoint/enable", { id }))
+  );
+
+  server.tool(
+    "debug_disable_watchpoint",
+    "Disable a watchpoint by its id without deleting it (won't fire until re-enabled).",
+    {
+      id: z.number().describe("Watchpoint id to disable"),
+    },
+    async ({ id }) => jsonText(await client.getJson("debug/watchpoint/disable", { id }))
+  );
+
+  server.tool(
     "debug_run",
     "Launch the target under the debugger and run until it stops (BLOCKING). Runs to the first breakpoint by default; stop_at_entry halts at the entry point. If not stopped within timeout_seconds the target is auto-paused and returned with its location (status \"paused\"). Use timeout_seconds=0 to wait indefinitely.",
     {

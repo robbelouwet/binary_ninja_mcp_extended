@@ -1090,6 +1090,49 @@ def debug_disable_breakpoint(id: int) -> str:
     return _json_dump(get_json("debug/breakpoint/disable", {"id": id}))
 
 
+@mcp.tool()
+def debug_set_watchpoint(address: str, size: int = 8, type: str = "write") -> str:
+    """
+    Set a hardware watchpoint that stops execution when memory is accessed.
+
+    - address: hex like "0x4034d0" or decimal.
+    - size: bytes to watch (1, 2, 4, or 8; default 8).
+    - type: "write" (default), "read", or "readwrite".
+
+    When the watched memory is accessed, run/continue stops with status
+    "watchpoint" naming this watchpoint (watchpoint_id). Hardware watchpoints are
+    a limited resource (typically 4); exceeding the limit returns a clear error.
+    Requires a live target.
+    """
+    return _json_dump(
+        safe_post_json("debug/watchpoint", {"address": address, "size": size, "type": type})
+    )
+
+
+@mcp.tool()
+def debug_list_watchpoints() -> str:
+    """List all hardware watchpoints (id, address, size, type, enabled)."""
+    return _json_dump(get_json("debug/watchpoint"))
+
+
+@mcp.tool()
+def debug_delete_watchpoint(id: int) -> str:
+    """Delete a watchpoint by its id (see debug_list_watchpoints)."""
+    return _json_dump(safe_post_json("debug/watchpoint", {"id": id, "_method": "DELETE"}))
+
+
+@mcp.tool()
+def debug_enable_watchpoint(id: int) -> str:
+    """Enable a previously disabled watchpoint by its id."""
+    return _json_dump(get_json("debug/watchpoint/enable", {"id": id}))
+
+
+@mcp.tool()
+def debug_disable_watchpoint(id: int) -> str:
+    """Disable a watchpoint by its id without deleting it (won't fire until re-enabled)."""
+    return _json_dump(get_json("debug/watchpoint/disable", {"id": id}))
+
+
 def _ctx_params(timeout_seconds, context):
     p = {"timeout": timeout_seconds}
     if not context:

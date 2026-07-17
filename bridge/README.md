@@ -174,6 +174,9 @@ automatically.
 - `debug_list_breakpoints` - List breakpoints
 - `debug_delete_breakpoint` - Delete a breakpoint by id
 - `debug_enable_breakpoint` / `debug_disable_breakpoint` - Enable/disable a breakpoint by id without deleting it
+- `debug_set_watchpoint` - Set a hardware watchpoint (write/read/readwrite); a hit stops with status `watchpoint`
+- `debug_list_watchpoints` / `debug_delete_watchpoint` - List / delete watchpoints
+- `debug_enable_watchpoint` / `debug_disable_watchpoint` - Enable/disable a watchpoint by id
 - `debug_run` - Launch and run until the next stop (blocking); `stop_at_entry` optional
 - `debug_continue` - Continue until the next stop (blocking)
 - `debug_step` - Single-instruction step into calls (blocking)

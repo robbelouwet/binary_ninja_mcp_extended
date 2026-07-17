@@ -92,6 +92,68 @@ def disable_breakpoint_route(req: Request):
     return {"status": "ok", "breakpoint": bp.to_dict()}
 
 
+@route("/debug/watchpoint", methods=("GET", "POST", "DELETE"))
+def watchpoint_route(req: Request):
+    """List (GET), add (POST) or delete (DELETE) a hardware watchpoint.
+
+    POST params: address, optional size (1/2/4/8, default 8), optional type
+    (read/write/readwrite, default write). DELETE params: id.
+    """
+    session = _session(req)
+
+    if req.method == "GET":
+        return {"watchpoints": session.list_watchpoints()}
+
+    if req.method == "DELETE":
+        wp_id = _wp_id(req)
+        if session.delete_watchpoint(wp_id):
+            return {"status": "ok", "message": f"Deleted watchpoint #{wp_id}"}
+        raise HTTPError(404, f"No watchpoint with id {wp_id}")
+
+    # POST
+    address = _address(req, "address", "addr", help="Required: address to watch")
+    try:
+        size = int(req.param("size", default=8))
+    except (ValueError, TypeError):
+        raise HTTPError(400, "Invalid size")
+    wtype = str(req.param("type", "access", default="write"))
+    try:
+        wp = session.add_watchpoint(address, size, wtype)
+    except DebuggerError as e:
+        raise HTTPError(400, str(e))
+    return {"status": "ok", "watchpoint": wp.to_dict()}
+
+
+def _wp_id(req: Request) -> int:
+    raw = req.require("id", help="Required: id of the watchpoint")
+    try:
+        return int(raw)
+    except (ValueError, TypeError):
+        raise HTTPError(400, f"Invalid watchpoint id: {raw!r}")
+
+
+@route("/debug/watchpoint/enable", methods=("GET", "POST"))
+def enable_watchpoint_route(req: Request):
+    """Enable a watchpoint by id."""
+    session = _session(req)
+    try:
+        wp = session.set_watchpoint_enabled(_wp_id(req), True)
+    except DebuggerError as e:
+        raise HTTPError(400, str(e))
+    return {"status": "ok", "watchpoint": wp.to_dict()}
+
+
+@route("/debug/watchpoint/disable", methods=("GET", "POST"))
+def disable_watchpoint_route(req: Request):
+    """Disable a watchpoint by id (kept in the list, but won't fire)."""
+    session = _session(req)
+    try:
+        wp = session.set_watchpoint_enabled(_wp_id(req), False)
+    except DebuggerError as e:
+        raise HTTPError(400, str(e))
+    return {"status": "ok", "watchpoint": wp.to_dict()}
+
+
 def _timeout_param(req: Request) -> float | None:
     """Parse the run/continue timeout: absent -> default, <=0 -> wait forever."""
     raw = req.param("timeout", "timeout_seconds")

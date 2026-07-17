@@ -240,6 +240,10 @@ and backtrace even with context off.
 | `debug_list_breakpoints()`                           | List all breakpoints with their ids, addresses, symbols, conditions, and enabled state.                                                                                |
 | `debug_delete_breakpoint(id)`                        | Delete a breakpoint by id.                                                                                                                                              |
 | `debug_enable_breakpoint(id)` / `debug_disable_breakpoint(id)` | Enable or disable a breakpoint by id (disabled ones stay in the list but don't fire).                                                                          |
+| `debug_set_watchpoint(address, size, type)`         | Set a hardware watchpoint (`type`: write/read/readwrite). When the memory is accessed, run/continue stops with status `watchpoint` naming it. HW watchpoints are limited (~4); over the limit errors. |
+| `debug_list_watchpoints()`                           | List all watchpoints (id, address, size, type, enabled).                                                                                                               |
+| `debug_delete_watchpoint(id)`                        | Delete a watchpoint by id.                                                                                                                                              |
+| `debug_enable_watchpoint(id)` / `debug_disable_watchpoint(id)` | Enable or disable a watchpoint by id.                                                                                                                          |
 | `debug_run(stop_at_entry, timeout_seconds, ...)`     | Launch the target and run until it stops (blocking). Runs to the first breakpoint by default; `stop_at_entry` halts at the entry point instead.                        |
 | `debug_continue(timeout_seconds)`                    | Continue a stopped target until it next stops (blocking).                                                                                                               |
 | `debug_step(timeout_seconds)`                        | Execute a single instruction, stepping into calls (blocking).                                                                                                           |
@@ -308,6 +312,8 @@ Interactive debugging endpoints:
 
 - `/debug/breakpoint` (GET/POST/DELETE): list, add (`location` = symbol/function name or address, optional `condition`), or delete (`id`) a breakpoint.
 - `/debug/breakpoint/enable?id=<id>` and `/debug/breakpoint/disable?id=<id>` (GET/POST): enable/disable a breakpoint without deleting it.
+- `/debug/watchpoint` (GET/POST/DELETE): list, add (`address`, optional `size`=1/2/4/8, optional `type`=write/read/readwrite), or delete (`id`) a hardware watchpoint. On a hit, run/continue returns `status: "watchpoint"` with `watchpoint_id`.
+- `/debug/watchpoint/enable?id=<id>` and `/debug/watchpoint/disable?id=<id>` (GET/POST): enable/disable a watchpoint.
 - `/debug/run?stop_at_entry=<bool>&timeout=<seconds>` (GET/POST): launch and run until the next stop (blocking). `timeout<=0` waits indefinitely. Optional `cmd_line`, `working_directory`, `adapter_type`.
 - `/debug/continue?timeout=<seconds>` (GET/POST): continue until the next stop (blocking).
 - `/debug/step?timeout=<seconds>` (GET/POST): single-instruction step into calls (blocking).
