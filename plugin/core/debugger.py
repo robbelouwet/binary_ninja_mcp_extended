@@ -117,6 +117,26 @@ _FATAL_REASONS = {
 }
 
 
+# Breakpoint-type names for the values Binary Ninja's controller reports. The
+# value arrives as a plain int from the core, so map by int rather than by enum.
+_BP_TYPE_NAMES = {
+    0: "Software",
+    1: "HardwareExecute",
+    2: "HardwareRead",
+    3: "HardwareWrite",
+    4: "HardwareAccess",
+}
+
+
+def _bp_type_name(raw) -> str | None:
+    if raw is None:
+        return None
+    try:
+        return _BP_TYPE_NAMES.get(int(raw), str(raw))
+    except (TypeError, ValueError):
+        return str(raw)
+
+
 class Breakpoint:
     """A user breakpoint tracked by the session (id, address, symbol, condition)."""
 
@@ -132,6 +152,9 @@ class Breakpoint:
         self.condition = condition
         self.symbol = symbol
         self.enabled = True
+        # True when this entry was adopted from Binary Ninja's own breakpoint
+        # list (placed in the UI) rather than created through this server.
+        self.adopted = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -285,8 +308,105 @@ class DebuggerSession:
             return bp
 
     def list_breakpoints(self) -> list[dict[str, Any]]:
+        """Every breakpoint of this view, merged from both registries.
+
+        ``self._breakpoints`` holds the ones this server created: they carry an
+        ``id`` and, when conditional, a condition evaluated by this plugin's own
+        expression evaluator (see ``core.condition``). Binary Ninja's controller
+        holds *all* of them, the ones placed in the UI included, with the
+        module/offset it stores them under and the condition that BN's own
+        expression parser evaluates. Those are two different engines, so the
+        conditions are reported separately: ``condition_engine`` says which one
+        owns ``condition``, and ``native_condition`` is set whenever BN holds a
+        condition of its own.
+
+        A native breakpoint that already has an absolute address and is not in
+        the registry is adopted into it, so it gets an ``id`` and the
+        delete/enable/disable tools act on it like any other. One that is still
+        relative (module+offset, no address yet because no target is live)
+        cannot be addressed that way, so it is reported with ``id: null`` and
+        ``pending: true``.
+        """
+        # Queried before taking the lock: this is BN's own state, and the lock
+        # guards only the registry.
+        native = _safe(lambda: list(self.controller.breakpoints), default=None)
+        synced = native is not None
+        native = native or []
+        native_addrs = {int(getattr(n, "address", 0) or 0) for n in native}
+
         with self._lock:
-            return [bp.to_dict() for bp in sorted(self._breakpoints.values(), key=lambda b: b.id)]
+            if synced:
+                # Drop adopted entries BN no longer reports (e.g. the target was
+                # relaunched at a different ASLR base), so they cannot pile up.
+                for bp_id in [
+                    i
+                    for i, bp in self._breakpoints.items()
+                    if bp.adopted and bp.address not in native_addrs
+                ]:
+                    del self._breakpoints[bp_id]
+
+            entries: dict[int, dict[str, Any]] = {}
+            for bp in sorted(self._breakpoints.values(), key=lambda b: b.id):
+                entry = bp.to_dict()
+                entry["source"] = "ui" if bp.adopted else "mcp"
+                entry["condition_engine"] = "mcp" if bp.condition else None
+                entries[bp.address] = entry
+            pending: list[dict[str, Any]] = []
+
+            for nbp in native:
+                offset = int(getattr(nbp, "offset", 0) or 0)
+                address = int(getattr(nbp, "address", 0) or 0)
+                condition = (getattr(nbp, "condition", "") or "").strip()
+                shared: dict[str, Any] = {
+                    "module": getattr(nbp, "module", "") or None,
+                    "offset": hex(offset),
+                    "enabled": bool(getattr(nbp, "enabled", True)),
+                    "type": _bp_type_name(getattr(nbp, "type", None)),
+                }
+                if shared["type"] not in (None, "Software"):
+                    shared["size"] = int(getattr(nbp, "size", 1) or 1)
+
+                entry = entries.get(address) if address else None
+                if entry is not None:
+                    # Known to both sides: BN owns module/offset/enabled/type.
+                    was_adopted = entry["source"] == "ui"
+                    entry.update(shared)
+                    entry["source"] = "ui" if was_adopted else "mcp+ui"
+                    if condition:
+                        entry["native_condition"] = condition
+                        if not entry.get("condition"):
+                            entry["condition"] = condition
+                            entry["condition_engine"] = "binaryninja"
+                        elif entry["condition"] != condition:
+                            entry["condition_engine"] = "mcp+binaryninja"
+                    continue
+
+                entry = dict(shared)
+                entry["address"] = hex(address) if address else None
+                entry["symbol"] = self._function_name(entry["address"])
+                entry["condition"] = condition or None
+                entry["native_condition"] = condition or None
+                entry["condition_engine"] = "binaryninja" if condition else None
+                entry["source"] = "ui"
+                if address:
+                    adopted = Breakpoint(self._next_bp_id, address, None, entry["symbol"])
+                    adopted.enabled = entry["enabled"]
+                    adopted.adopted = True
+                    self._next_bp_id += 1
+                    self._breakpoints[adopted.id] = adopted
+                    entry["id"] = adopted.id
+                    entries[address] = entry
+                else:
+                    entry["id"] = None
+                    entry["pending"] = True
+                    pending.append(entry)
+
+            merged = sorted(entries.values(), key=lambda e: e["id"]) + pending
+
+        for entry in merged:
+            for key in ("module", "offset", "type", "native_condition"):
+                entry.setdefault(key, None)
+        return merged
 
     def _breakpoint_at(self, address: int, enabled_only: bool = False) -> Breakpoint | None:
         with self._lock:
@@ -540,8 +660,8 @@ class DebuggerSession:
             ip = _safe(lambda: self.controller.ip, default=None)
             ip_hex = hex(ip) if isinstance(ip, int) else None
             func = self._function_name(ip_hex)
-        with self._lock:
-            bp_count = len(self._breakpoints)
+        # Merged count: breakpoints placed in the UI count too.
+        bp_count = len(self.list_breakpoints())
         return {
             "adapter": _safe(lambda: self.controller.adapter_type, default=None),
             "live": live,

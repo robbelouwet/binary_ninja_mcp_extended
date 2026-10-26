@@ -29,6 +29,10 @@ def _address(req: Request, *names: str, help: str | None = None) -> int:
 def breakpoint_route(req: Request):
     """List (GET), add (POST) or delete (DELETE) a breakpoint.
 
+    GET returns breakpoints from both registries: the ones created here and the
+    ones placed in the Binary Ninja UI (``source``: mcp / ui / mcp+ui). A UI
+    breakpoint that is still relative (no live target) has ``id: null`` and
+    ``pending: true``.
     POST params: location OR address (a hex/decimal address or a symbol/function
     name), optional condition (e.g. "rdi == 0x10").
     DELETE params: id.

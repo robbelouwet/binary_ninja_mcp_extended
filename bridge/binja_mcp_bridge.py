@@ -10,10 +10,14 @@ def _bridge_excepthook(exc_type, exc, tb):
 
 _sys.excepthook = _bridge_excepthook
 
+import os
+
 import requests
 from mcp.server.fastmcp import FastMCP
 
-binja_server_url = "http://localhost:9009"
+# Override with BINJA_MCP_URL to drive a Binary Ninja running on another host,
+# e.g. BINJA_MCP_URL=http://192.168.56.105:9009 for a VirtualBox guest.
+binja_server_url = os.environ.get("BINJA_MCP_URL", "http://localhost:9009")
 mcp = FastMCP("binja-mcp")
 
 
@@ -1066,7 +1070,15 @@ def debug_set_breakpoint(location: str, condition: str = "") -> str:
 
 @mcp.tool()
 def debug_list_breakpoints() -> str:
-    """List all breakpoints currently set in the debugger."""
+    """List all breakpoints, including ones placed in the Binary Ninja UI.
+
+    Each entry reports `source` (mcp / ui / mcp+ui), `module` + `offset` as BN
+    stores it, and the condition with the engine that evaluates it:
+    `condition_engine` is "mcp" (this server's evaluator, registers unsigned) or
+    "binaryninja" (BN's own parser), and `native_condition` is BN's own when set.
+    A UI breakpoint with no live target yet has `id: null` and `pending: true`;
+    it cannot be deleted or toggled by id until it resolves to an address.
+    """
     return _json_dump(get_json("debug/breakpoint"))
 
 
